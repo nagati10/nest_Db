@@ -11,7 +11,7 @@ import path from 'path';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
-@ApiTags('users')
+@ApiTags('admins')
 @Controller('admin')
 @Roles('admin')
 export class AdminController {

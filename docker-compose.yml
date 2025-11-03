@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - '4000:3005'
+    depends_on:
+      - mongo
+    volumes:
+      - ./uploads:/usr/src/app/uploads
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6.0
+    container_name: mongodb
+    environment:
+      - MONGO_INITDB_DATABASE=Talleb_5edma
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - '27017:27017'
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

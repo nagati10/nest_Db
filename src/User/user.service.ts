@@ -6,6 +6,7 @@ import { User, UserDocument } from './schemas/user.schema';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
+import { ResetPasswordDto } from './dto/reset-password-dto';
 
 @Injectable()
 export class UserService {
@@ -110,4 +111,35 @@ export class UserService {
     user.image = imagePath;
     return user.save();
   }
+
+  async checkEmailExists(email: string): Promise<boolean> {
+  const user = await this.userModel
+    .findOne({ email: email.toLowerCase().trim() })
+    .select('_id') // Only select ID for performance
+    .exec();
+  
+  return !!user;
+}
+  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
+    const { email, newPassword } = resetPasswordDto;
+
+    // Find user by email
+    const user = await this.findByEmail(email);
+    if (!user) {
+      throw new NotFoundException(`User with email ${email} not found`);
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user's password
+    await this.userModel.findByIdAndUpdate(
+      user._id,
+      { password: hashedPassword },
+      { new: true }
+    ).exec();
+
+    return { message: 'Password reset successfully' };
+  }
+
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpException, HttpStatus, UseGuards, UseInterceptors, UploadedFile, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpException, HttpStatus, UseGuards, UseInterceptors, UploadedFile, BadRequestException, NotFoundException, HttpCode } from '@nestjs/common';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -10,6 +10,7 @@ import { diskStorage } from 'multer';
 import path from 'path';
 import type { UserDocument } from './schemas/user.schema';
 import * as fs from 'fs';
+import { ResetPasswordDto } from './dto/reset-password-dto';
 
 @Controller('user/me')
 export class UserController {
@@ -113,5 +114,14 @@ export class UserController {
       }
       throw new HttpException('Problem au niveau serveur', HttpStatus.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  @Patch('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset user password by email' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.userService.resetPassword(resetPasswordDto);
   }
 }

@@ -52,6 +52,19 @@ export class AdminController {
     }
   }
 
+
+  @Get('email-exists/:email')
+  @ApiOperation({ summary: 'Check if email exists in system' })
+  @ApiResponse({ status: 200, description: 'Email existence check completed', schema: {
+  properties: {
+    exists: { type: 'boolean', example: true }
+  }
+  }})
+  async emailExists(@Param('email') email: string) {
+  const exists = await this.userService.checkEmailExists(email);
+  return { exists };
+  }
+  
   @Get('Get_All_Users')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get All users profile' })
@@ -93,6 +106,26 @@ export class AdminController {
   @UseGuards(JwtAuthGuard,RolesGuard)
   remove(@Param('id') id: string) {
     return this.userService.remove(id);
+  }
+
+
+
+  @Get('user-by-email/:email')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Find user by email' })
+  @ApiResponse({ status: 200, description: 'User found successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Admin Only' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async findByEmail(@Param('email') email: string) {
+  const user = await this.userService.findByEmail(email);
+
+  if (!user) {
+    throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+  }
+
+  return user;
   }
 
 }

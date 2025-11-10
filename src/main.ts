@@ -8,6 +8,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Enable CORS for your Android app
+  app.enableCors({
+    origin: ['http://localhost:3000', 'http://localhost:3001'], // Add your Android app URLs
+    credentials: true,
+  });
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
@@ -49,7 +54,8 @@ async function bootstrap() {
     },
   });
 
-  const port = 3005;
+  // Use Render's port or default to 3005
+  const port = process.env.PORT || 3005;
   await app.listen(port);
   console.log(`🚀 Application running on: http://localhost:${port}`);
   console.log(`📚 Swagger docs available on: http://localhost:${port}/api`);

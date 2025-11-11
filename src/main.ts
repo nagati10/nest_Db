@@ -4,8 +4,6 @@ import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import * as https from 'https';
-import * as http from 'http';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -56,50 +54,11 @@ async function bootstrap() {
     },
   });
 
-  // Use Render's port or default to 3005 - Convert to number
-  const port = parseInt(process.env.PORT || '3005', 10);
+  // Use Render's port or default to 3005
+  const port = process.env.PORT || 3005;
   await app.listen(port);
-  
-  // Start health check pinger for Render free tier
-  startHealthCheckPinger(port);
-  
   console.log(`🚀 Application running on: http://localhost:${port}`);
   console.log(`📚 Swagger docs available on: http://localhost:${port}/api`);
-  console.log(`❤️ Health check endpoint: http://localhost:${port}/health`);
-}
-
-function startHealthCheckPinger(port: number) {
-  const healthCheckUrl = `http://localhost:${port}/health`;
-  
-  const pingServer = () => {
-    const protocol = healthCheckUrl.startsWith('https') ? https : http;
-    
-    const req = protocol.get(healthCheckUrl, (res) => {
-      if (res.statusCode === 200) {
-        console.log(`✅ Health check successful at ${new Date().toISOString()}`);
-      } else {
-        console.log(`⚠️ Health check returned status: ${res.statusCode}`);
-      }
-    });
-
-    req.on('error', (err) => {
-      console.error(`❌ Health check failed: ${err.message}`);
-    });
-
-    req.setTimeout(10000, () => {
-      console.log('⏰ Health check timeout');
-      req.destroy();
-    });
-  };
-
-  // Ping immediately on startup
-  pingServer();
-  
-  // Then ping every 45 seconds
-  const intervalMs = 45 * 1000; // 45 seconds
-  setInterval(pingServer, intervalMs);
-  
-  console.log(`🔄 Health check pinger started (every ${intervalMs/1000} seconds)`);
 }
 
 bootstrap();

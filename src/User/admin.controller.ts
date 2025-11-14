@@ -128,4 +128,62 @@ export class AdminController {
   return user;
   }
 
+
+  // Add these admin endpoints to the AdminController class
+
+@Patch(':id/archive/toggle')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Toggle archive state for any user' })
+@ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Admin Only' })
+@UseGuards(JwtAuthGuard, RolesGuard)
+async switchArchiveState(@Param('id') id: string) {
+  return this.userService.switchArchiveState(id);
+}
+
+@Patch(':id/trust/level-up/:xp')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Increase trust XP for any user' })
+@ApiResponse({ status: 200, description: 'Trust XP increased successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Admin Only' })
+@UseGuards(JwtAuthGuard, RolesGuard)
+async levelUp(@Param('id') id: string, @Param('xp') xp: number) {
+  return this.userService.levelUp(id, xp);
+}
+
+@Patch(':id/trust/level-down/:xp')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Decrease trust XP for any user' })
+@ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Admin Only' })
+@UseGuards(JwtAuthGuard, RolesGuard)
+async levelDown(@Param('id') id: string, @Param('xp') xp: number) {
+  return this.userService.levelDown(id, xp);
+}
+
+@Get(':id/trust/level')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Get trust level for any user' })
+@ApiResponse({ status: 200, description: 'Returns trust level information' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Admin Only' })
+@UseGuards(JwtAuthGuard, RolesGuard)
+async getTrustLevel(@Param('id') id: string) {
+  return this.userService.getTrustLevel(id);
+}
+
+@Patch(':id/organization/toggle')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Toggle organization status for any user' })
+@ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Admin Only' })
+@UseGuards(JwtAuthGuard, RolesGuard)
+async toggleOrganization(@Param('id') id: string) {
+  return this.userService.toggleOrganization(id);
+}
+
 }

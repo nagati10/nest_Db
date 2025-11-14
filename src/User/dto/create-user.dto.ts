@@ -1,6 +1,7 @@
 import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '../enums/role.enum';
+import { Transform } from 'class-transformer';
 
 export class CreateUserDto {
   @ApiProperty({ description: 'Nom du producteur', example: 'Najd' })
@@ -34,9 +35,42 @@ export class CreateUserDto {
   @IsString()
   image?: string;
 
-
   @ApiProperty({ description: 'Mode examens activé ou non', example: false, required: false })
   @IsOptional()
   @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1) return true;
+    if (value === 'false' || value === false || value === 0) return false;
+    return value;
+  })
   modeExamens?: boolean;
+
+  @ApiProperty({ description: 'Archived status', example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1) return true;
+    if (value === 'false' || value === false || value === 0) return false;
+    return value;
+  })
+  is_archive?: boolean;
+
+  @ApiProperty({ description: 'Trust experience points', example: 0, required: false })
+  @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    return Number(value);
+  })
+  TrustXP?: number;
+
+  @ApiProperty({ description: 'Organization status', example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1) return true;
+    if (value === 'false' || value === false || value === 0) return false;
+    return value;
+  })
+  is_Organization?: boolean;
 }

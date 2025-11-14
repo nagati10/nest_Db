@@ -7,10 +7,8 @@ export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true, versionKey: false })
 export class User {
-
   @Prop({ required: true })
   nom: string;
-
 
   @Prop({ required: true, unique: true })
   email: string;
@@ -31,6 +29,19 @@ export class User {
   @ApiProperty({ description: 'Mode examens activé ou non', example: false })
   @Prop({ type: Boolean, default: false })
   modeExamens: boolean;
+
+  // New fields
+  @ApiProperty({ description: 'Archived status', example: false })
+  @Prop({ type: Boolean, default: false })
+  is_archive: boolean;
+
+  @ApiProperty({ description: 'Trust experience points', example: 0 })
+  @Prop({ type: Number, default: 0 })
+  TrustXP: number;
+
+  @ApiProperty({ description: 'Organization status', example: false })
+  @Prop({ type: Boolean, default: false })
+  is_Organization: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

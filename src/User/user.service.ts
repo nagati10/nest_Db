@@ -152,4 +152,79 @@ export class UserService {
   return user.save();
 }
 
+// Add these methods to the UserService class
+
+async switchArchiveState(userId: string): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  user.is_archive = !user.is_archive;
+  return user.save();
+}
+
+async levelUp(userId: string, xp: number): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  user.TrustXP += xp;
+  return user.save();
+}
+
+async levelDown(userId: string, xp: number): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  user.TrustXP = Math.max(0, user.TrustXP - xp);
+  return user.save();
+}
+
+async getTrustLevel(userId: string): Promise<{ level: number; text: string }> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+
+  const trustLevels = [
+    { threshold: 0, text: 'NotRecommended' },
+    { threshold: 10, text: 'Beginner' },
+    { threshold: 100, text: 'Intermediate' },
+    { threshold: 1000, text: 'Advanced' },
+    { threshold: 10000, text: 'Expert' },
+    { threshold: 100000, text: 'Master' },
+    { threshold: 1000000, text: 'Legend' }
+  ];
+
+  let level = 0;
+  let levelText = 'NotRecommended';
+
+  for (let i = trustLevels.length - 1; i >= 0; i--) {
+    if (user.TrustXP >= trustLevels[i].threshold) {
+      level = i;
+      levelText = trustLevels[i].text;
+      break;
+    }
+  }
+
+  return {
+    level,
+    text: levelText
+  };
+}
+
+async toggleOrganization(userId: string): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  user.is_Organization = !user.is_Organization;
+  return user.save();
+}
+
 }

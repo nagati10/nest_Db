@@ -140,4 +140,62 @@ async getModeExamens(@CurrentUser() user: any) {
     modeExamens: currentUser.modeExamens
   };
 }
+
+
+// Add these endpoints to the UserController class
+
+@Patch('archive/toggle')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Toggle archive state for current user' })
+@ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async switchArchiveState(@CurrentUser() user: any) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.switchArchiveState(id);
+}
+
+@Patch('trust/level-up/:xp')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Increase trust XP' })
+@ApiResponse({ status: 200, description: 'Trust XP increased successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async levelUp(@CurrentUser() user: any, @Param('xp') xp: number) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.levelUp(id, xp);
+}
+
+@Patch('trust/level-down/:xp')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Decrease trust XP' })
+@ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async levelDown(@CurrentUser() user: any, @Param('xp') xp: number) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.levelDown(id, xp);
+}
+
+@Get('trust/level')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Get current trust level and text' })
+@ApiResponse({ status: 200, description: 'Returns trust level information' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async getTrustLevel(@CurrentUser() user: any) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.getTrustLevel(id);
+}
+
+@Patch('organization/toggle')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Toggle organization status' })
+@ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async toggleOrganization(@CurrentUser() user: any) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.toggleOrganization(id);
+}
 }

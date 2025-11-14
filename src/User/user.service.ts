@@ -142,4 +142,14 @@ export class UserService {
     return { message: 'Password reset successfully' };
   }
 
+  async toggleExamMode(userId: string): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  user.modeExamens = !user.modeExamens;
+  return user.save();
+}
+
 }

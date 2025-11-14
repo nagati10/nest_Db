@@ -1,6 +1,6 @@
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { CreateUserDto } from './create-user.dto';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 import { Role } from '../enums/role.enum';
 
 export class UpdateUserDto {
@@ -23,4 +23,11 @@ contact: string;
 @IsOptional()
 @IsString()
 image?: string;
+
+
+@ApiProperty({ description: 'Mode examens activé ou non', example: false, required: false })
+@IsOptional()
+@IsBoolean()
+modeExamens?: boolean;
+
 }

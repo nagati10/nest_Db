@@ -44,7 +44,7 @@ export class UserController {
     };
   }
 
-    @Patch()
+  @Patch()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update current user profile' })
   @ApiResponse({ status: 200, description: 'update your profile' })
@@ -124,4 +124,20 @@ export class UserController {
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.userService.resetPassword(resetPasswordDto);
   }
+
+
+@Get('mode-examens')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Get current exam mode status' })
+@ApiResponse({ status: 200, description: 'Returns exam mode status' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async getModeExamens(@CurrentUser() user: any) {
+  const id = user.userId || user._id || user.id;
+  const currentUser = await this.userService.findOne(id);
+  
+  return {
+    modeExamens: currentUser.modeExamens
+  };
+}
 }

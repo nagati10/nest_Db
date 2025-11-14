@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '../enums/role.enum';
 
@@ -33,4 +33,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   image?: string;
+
+
+  @ApiProperty({ description: 'Mode examens activé ou non', example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  modeExamens?: boolean;
 }

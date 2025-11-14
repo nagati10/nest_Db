@@ -27,6 +27,10 @@ export class User {
   
   @Prop({ required: false })
   image?: string;
+
+  @ApiProperty({ description: 'Mode examens activé ou non', example: false })
+  @Prop({ type: Boolean, default: false })
+  modeExamens: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

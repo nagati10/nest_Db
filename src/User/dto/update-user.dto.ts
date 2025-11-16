@@ -1,6 +1,6 @@
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { CreateUserDto } from './create-user.dto';
-import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
 import { Role } from '../enums/role.enum';
 import { Transform } from 'class-transformer';
 
@@ -63,4 +63,29 @@ export class UpdateUserDto {
     return value;
   })
   is_Organization?: boolean;
+
+
+
+  @ApiProperty({ description: 'Array of liked offer IDs', example: [], required: false })
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined || value === '') {
+      return [];
+    }
+    // If it's already an array, return as is
+    if (Array.isArray(value)) {
+      return value;
+    }
+    // If it's a string, try to parse it as JSON array
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [value]; // Return as single element array
+      }
+    }
+    return value;
+  })
+  likedOffres?: string[];
 }

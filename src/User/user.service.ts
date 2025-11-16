@@ -3,7 +3,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectModel } from '@nestjs/mongoose';
 import { User, UserDocument } from './schemas/user.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { ResetPasswordDto } from './dto/reset-password-dto';
@@ -225,6 +225,54 @@ async toggleOrganization(userId: string): Promise<UserDocument> {
   
   user.is_Organization = !user.is_Organization;
   return user.save();
+}
+
+
+// Add these methods to the UserService class
+
+async addLikedOffre(userId: string, offreId: string): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  // Check if offer is already liked
+  if (!user.likedOffres.includes(new Types.ObjectId(offreId))) {
+    user.likedOffres.push(new Types.ObjectId(offreId));
+  }
+  
+  return user.save();
+}
+
+async removeLikedOffre(userId: string, offreId: string): Promise<UserDocument> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  user.likedOffres = user.likedOffres.filter(
+    id => id.toString() !== offreId
+  );
+  
+  return user.save();
+}
+
+async getLikedOffres(userId: string): Promise<Types.ObjectId[]> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  return user.likedOffres;
+}
+
+async isOffreLiked(userId: string, offreId: string): Promise<boolean> {
+  const user = await this.userModel.findById(userId);
+  if (!user) {
+    throw new NotFoundException(`User with ID ${userId} not found`);
+  }
+  
+  return user.likedOffres.some(id => id.toString() === offreId);
 }
 
 }

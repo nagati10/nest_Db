@@ -1,7 +1,7 @@
-// create-offre.dto.ts
-import { IsString, IsArray, IsOptional, IsObject, IsNotEmpty, IsNumber, IsDateString } from 'class-validator';
+import { IsString, IsArray, IsOptional, IsObject, IsNotEmpty, IsNumber, IsDateString, IsEnum, IsBoolean } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
+import { JobType, Shift } from '../schemas/offre.schema';
 
 class CoordinatesDto {
   @ApiProperty({ example: 48.8566, description: 'Latitude' })
@@ -48,13 +48,13 @@ export class CreateOffreDto {
   title: string;
 
   @ApiProperty({ 
-    type: 'string', 
-    format: 'binary',
-    description: 'Offer image file',
+    type: 'array', 
+    items: { type: 'string', format: 'binary' },
+    description: 'Array of offer image files',
     required: false
   })
   @IsOptional()
-  imageFile?: any;
+  imageFiles?: any[];
 
   @ApiProperty({ example: 'We are looking for an experienced developer...', description: 'Detailed description' })
   @IsString()
@@ -79,6 +79,23 @@ export class CreateOffreDto {
   tags?: string[];
 
   @ApiProperty({ 
+    example: ['3+ years experience', 'Bachelor degree', 'Team leadership'], 
+    description: 'Job requirements and qualifications',
+    required: false,
+    type: [String]
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map(exigence => exigence.trim());
+    }
+    return value;
+  })
+  exigences?: string[];
+
+  @ApiProperty({ 
     description: 'Location information',
     example: {
       address: '123 Main Street',
@@ -91,7 +108,11 @@ export class CreateOffreDto {
   @IsNotEmpty()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      return JSON.parse(value);
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
     }
     return value;
   })
@@ -108,15 +129,51 @@ export class CreateOffreDto {
   @IsOptional()
   salary?: string;
 
-  @ApiProperty({ example: 'Tech Solutions Inc.', description: 'Company name', required: false })
+  @ApiProperty({ example: 'Tech Solutions Inc.', description: 'Company name' })
   @IsString()
-  @IsOptional()
-  company?: string;
+  @IsNotEmpty()
+  company: string;
 
   @ApiProperty({ example: '2024-12-31', description: 'Expiration date', required: false })
   @IsDateString()
   @IsOptional()
   expiresAt?: string;
 
-  // Note: createdBy is removed as it will come from JWT token
+  @ApiProperty({ 
+    enum: JobType, 
+    example: JobType.JOB, 
+    description: 'Type of job',
+    required: false 
+  })
+  @IsEnum(JobType)
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === '' || value === null || value === undefined) return JobType.JOB;
+    return value.toLowerCase();
+  })
+  jobType?: JobType;
+
+  @ApiProperty({ 
+    enum: Shift, 
+    example: Shift.JOUR, 
+    description: 'Work shift',
+    required: false 
+  })
+  @IsEnum(Shift)
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === '' || value === null || value === undefined) return Shift.JOUR;
+    return value.toLowerCase();
+  })
+  shift?: Shift;
+
+  @ApiProperty({ example: true, description: 'Whether the offer is active', required: false })
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1) return true;
+    if (value === 'false' || value === false || value === 0) return false;
+    return value;
+  })
+  isActive?: boolean;
 }

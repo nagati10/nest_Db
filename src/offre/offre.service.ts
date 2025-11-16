@@ -1,290 +1,353 @@
-// offre.service.ts
-import { Injectable, NotFoundException, InternalServerErrorException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { 
+  Injectable, 
+  NotFoundException, 
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Offre, OffreDocument } from './schemas/offre.schema';
+import { User, UserDocument } from '../User/schemas/user.schema';
 import { CreateOffreDto } from './dto/create-offre.dto';
 import { UpdateOffreDto } from './dto/update-offre.dto';
-import { Offre, OffreDocument } from './schemas/offre.schema';
 
 @Injectable()
 export class OffreService {
   constructor(
     @InjectModel(Offre.name) private offreModel: Model<OffreDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>, // Add UserModel
   ) {}
 
-  async create(createOffreDto: CreateOffreDto, userId: string, imageFile?: Express.Multer.File): Promise<Offre> {
+  async create(
+    createOffreDto: CreateOffreDto, 
+    user: any, 
+    imageFiles?: Express.Multer.File[]
+  ): Promise<OffreDocument> {
     try {
-      // Validate user ID
-      if (!Types.ObjectId.isValid(userId)) {
-        throw new BadRequestException('Invalid user ID');
+      const userId = user._id || user.userId || user.id;
+      
+      if (!userId) {
+        throw new BadRequestException('Invalid user information');
       }
 
-      const offreData: any = {
+      // Process image files
+      const imagePaths = imageFiles?.map(file => `uploads/offres/${file.filename}`) || [];
+
+      // Create the offer
+      const offerData = {
         ...createOffreDto,
-        createdBy: new Types.ObjectId(userId), // Use userId from token
+        images: imagePaths,
+        createdBy: new Types.ObjectId(userId),
+        isActive: createOffreDto.isActive ?? true,
+        viewCount: 0,
+        likeCount: 0,
+        likedBy: [],
+        days: 0,
       };
 
-      // Handle image file upload
-      if (imageFile) {
-        offreData.image = `/uploads/offres/${imageFile.filename}`;
-      } else {
-        // Set default image if none provided
-        offreData.image = '/uploads/offres/default-offre.jpg';
-      }
-
-      // Set default expiration date if not provided
-      if (!offreData.expiresAt) {
-        offreData.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days from now
-      }
-
-      const createdOffre = new this.offreModel(offreData);
-      return await createdOffre.save();
+      const createdOffer = new this.offreModel(offerData);
+      return await createdOffer.save();
     } catch (error) {
-      if (error.name === 'ValidationError') {
-        throw new BadRequestException('Invalid input data');
-      }
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new InternalServerErrorException('Problem creating offer');
+      throw new InternalServerErrorException('Problem au niveau serveur');
     }
   }
 
-  async findAll(): Promise<Offre[]> {
-    try {
-      return await this.offreModel
-        .find({ isActive: true })
-        .populate('createdBy', 'name email')
-        .sort({ createdAt: -1 })
-        .exec();
-    } catch (error) {
-      throw new InternalServerErrorException('Problem fetching offers');
-    }
+  async findAllActive(): Promise<OffreDocument[]> {
+    return this.offreModel
+      .find({ isActive: true })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
   }
 
-  async findOne(id: string): Promise<Offre> {
+  async searchOffers(query: string): Promise<OffreDocument[]> {
+    if (!query || query.trim() === '') {
+      return this.findAllActive();
+    }
+
+    return this.offreModel
+      .find({
+        isActive: true,
+        $or: [
+          { title: { $regex: query, $options: 'i' } },
+          { description: { $regex: query, $options: 'i' } },
+          { company: { $regex: query, $options: 'i' } },
+          { tags: { $in: [new RegExp(query, 'i')] } }
+        ]
+      })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async findByTags(tags: string[]): Promise<OffreDocument[]> {
+    if (!tags || tags.length === 0) {
+      return this.findAllActive();
+    }
+
+    return this.offreModel
+      .find({
+        isActive: true,
+        tags: { $in: tags }
+      })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async findByCity(city: string): Promise<OffreDocument[]> {
+    return this.offreModel
+      .find({
+        isActive: true,
+        'location.city': { $regex: city, $options: 'i' }
+      })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async findByUser(user: any): Promise<OffreDocument[]> {
+    const userId = user._id || user.userId || user.id;
+    
+    return this.offreModel
+      .find({ createdBy: new Types.ObjectId(userId) })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async findByUserId(userId: string): Promise<OffreDocument[]> {
+    return this.offreModel
+      .find({ 
+        createdBy: new Types.ObjectId(userId),
+        isActive: true 
+      })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async findLikedOffers(user: any): Promise<OffreDocument[]> {
+    const userId = user._id || user.userId || user.id;
+    
+    // Get user's liked offers from user document
+    const userDoc = await this.userModel.findById(userId).select('likedOffres').exec();
+    
+    if (!userDoc || !userDoc.likedOffres || userDoc.likedOffres.length === 0) {
+      return [];
+    }
+
+    return this.offreModel
+      .find({
+        _id: { $in: userDoc.likedOffres },
+        isActive: true
+      })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async findPopular(): Promise<OffreDocument[]> {
+    return this.offreModel
+      .find({ isActive: true })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .sort({ viewCount: -1, likeCount: -1 })
+      .limit(10)
+      .exec();
+  }
+
+  async findOne(id: string): Promise<OffreDocument> {
     if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid offer ID');
+      throw new NotFoundException('Invalid offer ID');
     }
 
+    const offer = await this.offreModel
+      .findByIdAndUpdate(
+        id,
+        { $inc: { viewCount: 1 } },
+        { new: true }
+      )
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .exec();
+
+    if (!offer) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    return offer;
+  }
+
+  async update(
+    id: string, 
+    updateOffreDto: UpdateOffreDto, 
+    user: any
+  ): Promise<OffreDocument> {
+    const userId = user._id || user.userId || user.id;
+    
+    // Check if offer exists and user owns it
+    const existingOffer = await this.offreModel.findById(id).exec();
+    if (!existingOffer) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    // Check if user is the owner of the offer
+    if (existingOffer.createdBy.toString() !== userId.toString()) {
+      throw new ForbiddenException('You can only update your own offers');
+    }
+
+    const updatedOffer = await this.offreModel
+      .findByIdAndUpdate(id, updateOffreDto, { new: true })
+      .populate('createdBy', 'nom email image contact modeExamens is_archive TrustXP is_Organization')
+      .exec();
+
+    if (!updatedOffer) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    return updatedOffer;
+  }
+
+  async remove(id: string, user: any): Promise<{ message: string }> {
+    const userId = user._id || user.userId || user.id;
+    
+    // Check if offer exists and user owns it
+    const existingOffer = await this.offreModel.findById(id).exec();
+    if (!existingOffer) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    // Check if user is the owner of the offer
+    if (existingOffer.createdBy.toString() !== userId.toString()) {
+      throw new ForbiddenException('You can only delete your own offers');
+    }
+
+    const result = await this.offreModel.findByIdAndDelete(id).exec();
+    
+    if (!result) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    return { message: 'Offer deleted successfully' };
+  }
+
+  async toggleLike(id: string, user: any): Promise<{ liked: boolean; likeCount: number }> {
+    const userId = user._id || user.userId || user.id;
+    
+    const offer = await this.offreModel.findById(id).exec();
+    if (!offer) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    const userObjectId = new Types.ObjectId(userId);
+    const isLiked = offer.likedBy.some(like => like.equals(userObjectId));
+
+    let updateQuery;
+    if (isLiked) {
+      // Unlike
+      updateQuery = {
+        $pull: { likedBy: userObjectId },
+        $inc: { likeCount: -1 }
+      };
+    } else {
+      // Like
+      updateQuery = {
+        $addToSet: { likedBy: userObjectId },
+        $inc: { likeCount: 1 }
+      };
+    }
+
+    const updatedOffer = await this.offreModel
+      .findByIdAndUpdate(id, updateQuery, { new: true })
+      .exec();
+
+    if (!updatedOffer) {
+      throw new NotFoundException(`Offer with ID ${id} not found`);
+    }
+
+    // Also update user's likedOffres array
+    await this.updateUserLikedOffres(userId, id, !isLiked);
+
+    return {
+      liked: !isLiked,
+      likeCount: updatedOffer.likeCount
+    };
+  }
+
+  private async updateUserLikedOffres(userId: string, offreId: string, add: boolean): Promise<void> {
     try {
-      const offre = await this.offreModel
-        .findById(id)
-        .populate('createdBy', 'name email')
-        .exec();
-
-      if (!offre) {
-        throw new NotFoundException(`Offer with ID ${id} not found`);
+      const userObjectId = new Types.ObjectId(userId);
+      const offreObjectId = new Types.ObjectId(offreId);
+      
+      let updateQuery;
+      if (add) {
+        // Add to user's likedOffres
+        updateQuery = {
+          $addToSet: { likedOffres: offreObjectId }
+        };
+      } else {
+        // Remove from user's likedOffres
+        updateQuery = {
+          $pull: { likedOffres: offreObjectId }
+        };
       }
-
-      // Increment view count
-      await this.offreModel.findByIdAndUpdate(id, { $inc: { viewCount: 1 } });
-
-      return offre;
+      
+      await this.userModel.findByIdAndUpdate(userObjectId, updateQuery).exec();
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Problem fetching offer');
+      console.error('Error updating user likedOffres:', error);
+      // Don't throw error here to avoid breaking the like operation
     }
   }
 
-  async update(id: string, updateOffreDto: UpdateOffreDto, userId: string, imageFile?: Express.Multer.File): Promise<Offre> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid offer ID');
-    }
-
-    if (!Types.ObjectId.isValid(userId)) {
-      throw new BadRequestException('Invalid user ID');
-    }
-
-    try {
-      // First, check if the offer exists and user owns it
-      const existingOffre = await this.offreModel.findById(id).exec();
-      if (!existingOffre) {
-        throw new NotFoundException(`Offer with ID ${id} not found`);
-      }
-
-      // Check if user owns the offer
-      if (existingOffre.createdBy.toString() !== userId) {
-        throw new ForbiddenException('You can only update your own offers');
-      }
-
-      const updateData: any = { ...updateOffreDto };
-
-      // Handle image file upload for update
-      if (imageFile) {
-        updateData.image = `/uploads/offres/${imageFile.filename}`;
-      }
-
-      // Remove createdBy from update data to prevent ownership change
-      delete updateData.createdBy;
-
-      // Convert location string to object if needed
-      if (updateData.location && typeof updateData.location === 'string') {
-        updateData.location = JSON.parse(updateData.location);
-      }
-
-      // Convert tags string to array if needed
-      if (updateData.tags && typeof updateData.tags === 'string') {
-        updateData.tags = updateData.tags.split(',').map(tag => tag.trim());
-      }
-
-      const updatedOffre = await this.offreModel
-        .findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true })
-        .populate('createdBy', 'name email')
-        .exec();
-
-      if (!updatedOffre) {
-        throw new NotFoundException(`Offer with ID ${id} not found after update`);
-      }
-
-      return updatedOffre;
-    } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
-        throw error;
-      }
-      if (error.name === 'ValidationError' || error.name === 'CastError') {
-        throw new BadRequestException('Invalid input data');
-      }
-      throw new InternalServerErrorException('Problem updating offer');
-    }
+  // Additional utility methods
+  async getUserOffersCount(userId: string): Promise<number> {
+    return this.offreModel
+      .countDocuments({ createdBy: new Types.ObjectId(userId) })
+      .exec();
   }
 
-  async remove(id: string, userId?: string): Promise<{ message: string }> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid offer ID');
-    }
+  async getOffersStats(): Promise<{ total: number; active: number; popular: number }> {
+    const total = await this.offreModel.countDocuments().exec();
+    const active = await this.offreModel.countDocuments({ isActive: true }).exec();
+    const popular = await this.offreModel.countDocuments({ likeCount: { $gt: 10 } }).exec();
 
-    try {
-      // If userId is provided, check ownership (for authenticated users)
-      if (userId) {
-        if (!Types.ObjectId.isValid(userId)) {
-          throw new BadRequestException('Invalid user ID');
-        }
-
-        const existingOffre = await this.offreModel.findById(id).exec();
-        if (!existingOffre) {
-          throw new NotFoundException(`Offer with ID ${id} not found`);
-        }
-        if (existingOffre.createdBy.toString() !== userId) {
-          throw new ForbiddenException('You can only delete your own offers');
-        }
-      }
-
-      const result = await this.offreModel.findByIdAndDelete(id).exec();
-
-      if (!result) {
-        throw new NotFoundException(`Offer with ID ${id} not found`);
-      }
-
-      return { message: 'Offer deleted successfully' };
-    } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Problem deleting offer');
-    }
+    return { total, active, popular };
   }
 
-  async findByTags(tags: string[]): Promise<Offre[]> {
-    try {
-      return await this.offreModel
-        .find({ 
-          tags: { $in: tags },
+  async deactivateExpiredOffers(): Promise<{ deactivated: number }> {
+    const result = await this.offreModel
+      .updateMany(
+        { 
+          expiresAt: { $lt: new Date() },
           isActive: true 
-        })
-        .populate('createdBy', 'name email')
-        .sort({ createdAt: -1 })
-        .exec();
-    } catch (error) {
-      throw new InternalServerErrorException('Problem fetching offers by tags');
-    }
+        },
+        { isActive: false }
+      )
+      .exec();
+
+    return { deactivated: result.modifiedCount };
   }
 
-  async findByLocation(city: string): Promise<Offre[]> {
-    try {
-      return await this.offreModel
-        .find({ 
-          'location.city': new RegExp(city, 'i'),
-          isActive: true 
-        })
-        .populate('createdBy', 'name email')
-        .sort({ createdAt: -1 })
-        .exec();
-    } catch (error) {
-      throw new InternalServerErrorException('Problem fetching offers by location');
+  // Helper method to update offer likes (for alternative approach)
+  async updateOfferLikes(offreId: string, userId: string, add: boolean): Promise<void> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    let updateQuery;
+    if (add) {
+      updateQuery = {
+        $addToSet: { likedBy: userObjectId },
+        $inc: { likeCount: 1 }
+      };
+    } else {
+      updateQuery = {
+        $pull: { likedBy: userObjectId },
+        $inc: { likeCount: -1 }
+      };
     }
-  }
-
-  async searchOffres(query: string): Promise<Offre[]> {
-    try {
-      return await this.offreModel
-        .find({
-          $and: [
-            { isActive: true },
-            {
-              $or: [
-                { title: new RegExp(query, 'i') },
-                { description: new RegExp(query, 'i') },
-                { tags: new RegExp(query, 'i') },
-                { company: new RegExp(query, 'i') },
-                { 'location.city': new RegExp(query, 'i') },
-                { category: new RegExp(query, 'i') },
-              ],
-            },
-          ],
-        })
-        .populate('createdBy', 'name email')
-        .sort({ createdAt: -1 })
-        .exec();
-    } catch (error) {
-      throw new InternalServerErrorException('Problem searching offers');
-    }
-  }
-
-  async findByUser(userId: string): Promise<Offre[]> {
-    if (!Types.ObjectId.isValid(userId)) {
-      throw new BadRequestException('Invalid user ID');
-    }
-
-    try {
-      return await this.offreModel
-        .find({ 
-          createdBy: new Types.ObjectId(userId) 
-        })
-        .populate('createdBy', 'name email')
-        .sort({ createdAt: -1 })
-        .exec();
-    } catch (error) {
-      throw new InternalServerErrorException('Problem fetching user offers');
-    }
-  }
-
-  async getPopularOffres(limit: number = 10): Promise<Offre[]> {
-    try {
-      return await this.offreModel
-        .find({ isActive: true })
-        .sort({ viewCount: -1, createdAt: -1 })
-        .limit(limit)
-        .populate('createdBy', 'name email')
-        .exec();
-    } catch (error) {
-      throw new InternalServerErrorException('Problem fetching popular offers');
-    }
-  }
-
-  // Additional method to verify offer ownership
-  async verifyOwnership(offerId: string, userId: string): Promise<boolean> {
-    if (!Types.ObjectId.isValid(offerId) || !Types.ObjectId.isValid(userId)) {
-      return false;
-    }
-
-    try {
-      const offre = await this.offreModel.findById(offerId).exec();
-      return !!offre && offre.createdBy.toString() === userId;
-    } catch (error) {
-      return false;
-    }
+    
+    await this.offreModel.findByIdAndUpdate(offreId, updateQuery).exec();
   }
 }

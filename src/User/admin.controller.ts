@@ -17,11 +17,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 export class AdminController {
   constructor(private readonly userService: UserService) {}
 
-
-
   @Post('register')
-  @ApiOperation({ summary: 'Register new user', description: 'Create a new user account with optional profile image' })
   @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Register new user', description: 'Create a new user account with optional profile image' })
   @ApiBody({
     description: 'User registration form with optional profile image',
     type: CreateUserDto
@@ -51,7 +49,6 @@ export class AdminController {
       throw new HttpException('Problem au niveau serveur', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
-
 
   @Get('email-exists/:email')
   @ApiOperation({ summary: 'Check if email exists in system' })
@@ -89,6 +86,7 @@ export class AdminController {
 
   @Patch(':id')
   @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update Any users profile' })
   @ApiResponse({ status: 200, description: 'update any user profile' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -108,8 +106,6 @@ export class AdminController {
     return this.userService.remove(id);
   }
 
-
-
   @Get('user-by-email/:email')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Find user by email' })
@@ -128,62 +124,51 @@ export class AdminController {
   return user;
   }
 
+  @Patch(':id/archive/toggle')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Toggle archive state for any user' })
+  @ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Admin Only' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async switchArchiveState(@Param('id') id: string) {
+    return this.userService.switchArchiveState(id);
+  }
 
-  // Add these admin endpoints to the AdminController class
+  @Patch(':id/trust/level-up/:xp')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Increase trust XP for any user' })
+  @ApiResponse({ status: 200, description: 'Trust XP increased successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Admin Only' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async levelUp(@Param('id') id: string, @Param('xp') xp: number) {
+    return this.userService.levelUp(id, xp);
+  }
 
-@Patch(':id/archive/toggle')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Toggle archive state for any user' })
-@ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Admin Only' })
-@UseGuards(JwtAuthGuard, RolesGuard)
-async switchArchiveState(@Param('id') id: string) {
-  return this.userService.switchArchiveState(id);
-}
+  @Patch(':id/trust/level-down/:xp')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Decrease trust XP for any user' })
+  @ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Admin Only' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async levelDown(@Param('id') id: string, @Param('xp') xp: number) {
+    return this.userService.levelDown(id, xp);
+  }
 
-@Patch(':id/trust/level-up/:xp')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Increase trust XP for any user' })
-@ApiResponse({ status: 200, description: 'Trust XP increased successfully' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Admin Only' })
-@UseGuards(JwtAuthGuard, RolesGuard)
-async levelUp(@Param('id') id: string, @Param('xp') xp: number) {
-  return this.userService.levelUp(id, xp);
-}
-
-@Patch(':id/trust/level-down/:xp')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Decrease trust XP for any user' })
-@ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Admin Only' })
-@UseGuards(JwtAuthGuard, RolesGuard)
-async levelDown(@Param('id') id: string, @Param('xp') xp: number) {
-  return this.userService.levelDown(id, xp);
-}
-
-@Get(':id/trust/level')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Get trust level for any user' })
-@ApiResponse({ status: 200, description: 'Returns trust level information' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Admin Only' })
-@UseGuards(JwtAuthGuard, RolesGuard)
-async getTrustLevel(@Param('id') id: string) {
-  return this.userService.getTrustLevel(id);
-}
-
-@Patch(':id/organization/toggle')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Toggle organization status for any user' })
-@ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Admin Only' })
-@UseGuards(JwtAuthGuard, RolesGuard)
-async toggleOrganization(@Param('id') id: string) {
-  return this.userService.toggleOrganization(id);
-}
-
+  @Patch(':id/organization/toggle')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Toggle organization status for any user' })
+  @ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Admin Only' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async toggleOrganization(@Param('id') id: string) {
+    return this.userService.toggleOrganization(id);
+  }
 }

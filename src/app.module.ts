@@ -10,7 +10,8 @@ import { AvisModule } from './avis/avis.module';
 import { EvenementModule } from './evenement/evenement.module';
 import { DisponibiliteModule } from './disponibilite/disponibilite.module';
 import { ReclamationModule } from './reclamation/reclamation.module';
-
+import { StudentPreferenceModule } from './student_preference/student_preference.module';
+import { ChatModule } from './chat/chat.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -25,6 +26,8 @@ import { ReclamationModule } from './reclamation/reclamation.module';
     EvenementModule,
     DisponibiliteModule,
     ReclamationModule,
+    StudentPreferenceModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

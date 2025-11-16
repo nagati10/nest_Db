@@ -1,30 +1,36 @@
-// offre.controller.ts
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Body, 
-  Patch, 
-  Param, 
-  Delete, 
-  Query, 
-  UsePipes, 
-  ValidationPipe,
+import {
+  Controller,
+  Post,
+  Body,
+  UploadedFiles,
   UseInterceptors,
-  UploadedFile,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
   HttpException,
   HttpStatus,
-  UseGuards
+  Get,
+  Patch,
+  Delete,
+  Param,
+  Query,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import path from 'path';
 import { OffreService } from './offre.service';
 import { CreateOffreDto } from './dto/create-offre.dto';
 import { UpdateOffreDto } from './dto/update-offre.dto';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as path from 'path';
 
 @ApiTags('offres')
 @Controller('offre')
@@ -34,10 +40,13 @@ export class OffreController {
 
   @Post()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create new offer', description: 'Create a new job offer with optional image' })
+  @ApiOperation({ 
+    summary: 'Create new offer', 
+    description: 'Create a new job offer with optional images' 
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
-    description: 'Offer creation form with optional image',
+    description: 'Offer creation form with optional images',
     type: CreateOffreDto
   })
   @ApiResponse({ status: 201, description: 'Offer successfully created' })
@@ -45,7 +54,7 @@ export class OffreController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 500, description: 'Server problem' })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('imageFile', {
+  @UseInterceptors(FilesInterceptor('imageFiles', 10, {
     storage: diskStorage({
       destination: './uploads/offres',
       filename: (req, file, cb) => {
@@ -61,22 +70,22 @@ export class OffreController {
       }
     },
     limits: {
-      fileSize: 5 * 1024 * 1024, // 5MB limit
+      fileSize: 5 * 1024 * 1024, // 5MB
     }
   }))
   async create(
     @Body() createOffreDto: CreateOffreDto,
-    @UploadedFile() imageFile?: Express.Multer.File,
+    @UploadedFiles() imageFiles?: Express.Multer.File[],
     @CurrentUser() user?: any,
   ) {
     try {
-      // Extract user ID from token
-      const userId = user.userId || user._id || user.id;
-      if (!userId) {
+      // The CurrentUser decorator should provide the full user object from the token
+      if (!user) {
         throw new HttpException('User not found in token', HttpStatus.UNAUTHORIZED);
       }
-      
-      return await this.offreService.create(createOffreDto, userId, imageFile);
+
+      // Use the user object directly from the token
+      return await this.offreService.create(createOffreDto, user, imageFiles);
     } catch (error) {
       if (error.status === 400 || error.status === 401) {
         throw new HttpException(error.message, error.status);
@@ -87,67 +96,70 @@ export class OffreController {
 
   @Get()
   @ApiOperation({ summary: 'Get all active offers' })
-  @ApiResponse({ status: 200, description: 'List of all active offers' })
+  @ApiResponse({ status: 200, description: 'Returns all active offers' })
   async findAll() {
-    return this.offreService.findAll();
+    return this.offreService.findAllActive();
   }
 
   @Get('search')
   @ApiOperation({ summary: 'Search offers by query' })
-  @ApiResponse({ status: 200, description: 'Search results' })
+  @ApiResponse({ status: 200, description: 'Returns matching offers' })
   async search(@Query('q') query: string) {
-    if (!query) {
-      throw new HttpException('Query parameter is required', HttpStatus.BAD_REQUEST);
-    }
-    return this.offreService.searchOffres(query);
+    return this.offreService.searchOffers(query);
   }
 
   @Get('tags')
   @ApiOperation({ summary: 'Find offers by tags' })
-  @ApiResponse({ status: 200, description: 'Offers matching the tags' })
+  @ApiResponse({ status: 200, description: 'Returns offers with matching tags' })
   async findByTags(@Query('tags') tags: string) {
-    if (!tags) {
-      throw new HttpException('Tags parameter is required', HttpStatus.BAD_REQUEST);
-    }
-    const tagsArray = tags.split(',').map(tag => tag.trim());
-    return this.offreService.findByTags(tagsArray);
+    const tagArray = tags.split(',').map(tag => tag.trim());
+    return this.offreService.findByTags(tagArray);
   }
 
   @Get('location/:city')
   @ApiOperation({ summary: 'Find offers by city' })
-  @ApiResponse({ status: 200, description: 'Offers in the specified city' })
-  async findByLocation(@Param('city') city: string) {
-    return this.offreService.findByLocation(city);
+  @ApiResponse({ status: 200, description: 'Returns offers in the specified city' })
+  async findByCity(@Param('city') city: string) {
+    return this.offreService.findByCity(city);
   }
 
   @Get('my-offers')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user offers' })
-  @ApiResponse({ status: 200, description: 'Current user offers' })
+  @ApiResponse({ status: 200, description: 'Returns current user offers' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
   async findMyOffers(@CurrentUser() user: any) {
-    const userId = user.userId || user._id || user.id;
-    return this.offreService.findByUser(userId);
+    return this.offreService.findByUser(user);
+  }
+
+  @Get('liked')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get offers liked by current user' })
+  @ApiResponse({ status: 200, description: 'Returns liked offers' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async findLikedOffers(@CurrentUser() user: any) {
+    return this.offreService.findLikedOffers(user);
   }
 
   @Get('user/:userId')
   @ApiOperation({ summary: 'Find offers by user ID' })
-  @ApiResponse({ status: 200, description: 'User offers' })
-  async findByUser(@Param('userId') userId: string) {
-    return this.offreService.findByUser(userId);
+  @ApiResponse({ status: 200, description: 'Returns user offers' })
+  async findByUserId(@Param('userId') userId: string) {
+    return this.offreService.findByUserId(userId);
   }
 
   @Get('popular')
   @ApiOperation({ summary: 'Get popular offers' })
-  @ApiResponse({ status: 200, description: 'Most viewed offers' })
-  async getPopularOffres(@Query('limit') limit: number = 10) {
-    return this.offreService.getPopularOffres(limit);
+  @ApiResponse({ status: 200, description: 'Returns popular offers' })
+  async findPopular() {
+    return this.offreService.findPopular();
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get offer by ID' })
-  @ApiResponse({ status: 200, description: 'Offer details' })
+  @ApiResponse({ status: 200, description: 'Returns the offer' })
   @ApiResponse({ status: 404, description: 'Offer not found' })
   async findOne(@Param('id') id: string) {
     return this.offreService.findOne(id);
@@ -156,43 +168,16 @@ export class OffreController {
   @Patch(':id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update offer' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    description: 'Offer update form with optional new image',
-    type: UpdateOffreDto
-  })
   @ApiResponse({ status: 200, description: 'Offer updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Not your offer' })
   @ApiResponse({ status: 404, description: 'Offer not found' })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('imageFile', {
-    storage: diskStorage({
-      destination: './uploads/offres',
-      filename: (req, file, cb) => {
-        const uniqueName = `offre-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-        cb(null, uniqueName);
-      }
-    }),
-    fileFilter: (req, file, cb) => {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new Error('Only image files are allowed'), false);
-      }
-    },
-    limits: {
-      fileSize: 5 * 1024 * 1024, // 5MB limit
-    }
-  }))
   async update(
-    @Param('id') id: string, 
+    @Param('id') id: string,
     @Body() updateOffreDto: UpdateOffreDto,
-    @UploadedFile() imageFile?: Express.Multer.File,
-    @CurrentUser() user?: any,
+    @CurrentUser() user: any,
   ) {
-    const userId = user.userId || user._id || user.id;
-    return this.offreService.update(id, updateOffreDto, userId, imageFile);
+    return this.offreService.update(id, updateOffreDto, user);
   }
 
   @Delete(':id')
@@ -200,11 +185,25 @@ export class OffreController {
   @ApiOperation({ summary: 'Delete offer' })
   @ApiResponse({ status: 200, description: 'Offer deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Not your offer' })
   @ApiResponse({ status: 404, description: 'Offer not found' })
   @UseGuards(JwtAuthGuard)
-  remove(@Param('id') id: string, @CurrentUser() user: any) {
-    const userId = user.userId || user._id || user.id;
-    return this.offreService.remove(id, userId);
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.offreService.remove(id, user);
+  }
+
+  @Post(':id/like')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Like or unlike an offer' })
+  @ApiResponse({ status: 200, description: 'Like status updated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async likeOffer(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.offreService.toggleLike(id, user);
   }
 }

@@ -14,14 +14,19 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Serve static files for all uploads (this includes chat)
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
   });
+
+  // Remove this line - it's redundant since the above line already serves all uploads
+  // app.use('/uploads/chat', express.static(join(__dirname, '..', 'uploads', 'chat')));
 
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true, 
     forbidNonWhitelisted: true, 
     transform: true, 
+    
     exceptionFactory: (errors) => {
       const formattedErrors = errors.map(error => {
         const constraints = error.constraints || {};

@@ -46,6 +46,7 @@ export class UserController {
 
   @Patch()
   @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update current user profile' })
   @ApiResponse({ status: 200, description: 'update your profile' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -68,8 +69,8 @@ export class UserController {
 
   @Patch('image/update')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update profile image' })
   @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update profile image' })
   @ApiBody({
     description: 'Profile image file',
     schema: {
@@ -117,6 +118,7 @@ export class UserController {
   }
 
   @Patch('reset-password')
+  @ApiConsumes('multipart/form-data')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset user password by email' })
   @ApiResponse({ status: 200, description: 'Password reset successfully' })
@@ -125,77 +127,154 @@ export class UserController {
     return this.userService.resetPassword(resetPasswordDto);
   }
 
+  @Get('mode-examens')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current exam mode status' })
+  @ApiResponse({ status: 200, description: 'Returns exam mode status' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async getModeExamens(@CurrentUser() user: any) {
+    const id = user.userId || user._id || user.id;
+    const currentUser = await this.userService.findOne(id);
+    
+    return {
+      modeExamens: currentUser.modeExamens
+    };
+  }
 
-@Get('mode-examens')
+  @Patch('archive/toggle')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Toggle archive state for current user' })
+  @ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async switchArchiveState(@CurrentUser() user: any) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.switchArchiveState(id);
+  }
+
+  @Patch('trust/level-up/:xp')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Increase trust XP' })
+  @ApiResponse({ status: 200, description: 'Trust XP increased successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async levelUp(@CurrentUser() user: any, @Param('xp') xp: number) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.levelUp(id, xp);
+  }
+
+  @Patch('trust/level-down/:xp')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Decrease trust XP' })
+  @ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async levelDown(@CurrentUser() user: any, @Param('xp') xp: number) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.levelDown(id, xp);
+  }
+
+  @Get('trust/level')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current trust level and text' })
+  @ApiResponse({ status: 200, description: 'Returns trust level information' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async getTrustLevel(@CurrentUser() user: any) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.getTrustLevel(id);
+  }
+
+  @Patch('organization/toggle')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Toggle organization status' })
+  @ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async toggleOrganization(@CurrentUser() user: any) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.toggleOrganization(id);
+  }
+
+
+  @Get('liked-offres')
 @ApiBearerAuth()
-@ApiOperation({ summary: 'Get current exam mode status' })
-@ApiResponse({ status: 200, description: 'Returns exam mode status' })
+@ApiOperation({ summary: 'Get current user liked offers' })
+@ApiResponse({ status: 200, description: 'Returns array of liked offer IDs' })
 @ApiResponse({ status: 401, description: 'Unauthorized' })
 @UseGuards(JwtAuthGuard)
-async getModeExamens(@CurrentUser() user: any) {
+async getLikedOffres(@CurrentUser() user: any) {
   const id = user.userId || user._id || user.id;
-  const currentUser = await this.userService.findOne(id);
+  const likedOffres = await this.userService.getLikedOffres(id);
   
   return {
-    modeExamens: currentUser.modeExamens
+    likedOffres: likedOffres.map(id => id.toString())
   };
 }
 
-
-// Add these endpoints to the UserController class
-
-@Patch('archive/toggle')
+@Post('like-offre/:offreId')
 @ApiBearerAuth()
-@ApiOperation({ summary: 'Toggle archive state for current user' })
-@ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
+@ApiOperation({ summary: 'Add offer to liked list' })
+@ApiResponse({ status: 200, description: 'Offer added to liked list' })
 @ApiResponse({ status: 401, description: 'Unauthorized' })
 @UseGuards(JwtAuthGuard)
-async switchArchiveState(@CurrentUser() user: any) {
+async addLikedOffre(
+  @CurrentUser() user: any,
+  @Param('offreId') offreId: string
+) {
   const id = user.userId || user._id || user.id;
-  return this.userService.switchArchiveState(id);
+  return this.userService.addLikedOffre(id, offreId);
 }
 
-@Patch('trust/level-up/:xp')
+@Delete('unlike-offre/:offreId')
 @ApiBearerAuth()
-@ApiOperation({ summary: 'Increase trust XP' })
-@ApiResponse({ status: 200, description: 'Trust XP increased successfully' })
+@ApiOperation({ summary: 'Remove offer from liked list' })
+@ApiResponse({ status: 200, description: 'Offer removed from liked list' })
 @ApiResponse({ status: 401, description: 'Unauthorized' })
 @UseGuards(JwtAuthGuard)
-async levelUp(@CurrentUser() user: any, @Param('xp') xp: number) {
+async removeLikedOffre(
+  @CurrentUser() user: any,
+  @Param('offreId') offreId: string
+) {
   const id = user.userId || user._id || user.id;
-  return this.userService.levelUp(id, xp);
+  return this.userService.removeLikedOffre(id, offreId);
 }
 
-@Patch('trust/level-down/:xp')
+@Get('is-offre-liked/:offreId')
 @ApiBearerAuth()
-@ApiOperation({ summary: 'Decrease trust XP' })
-@ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
+@ApiOperation({ summary: 'Check if offer is liked by current user' })
+@ApiResponse({ status: 200, description: 'Returns like status', schema: {
+  properties: {
+    isLiked: { type: 'boolean', example: true }
+  }
+}})
 @ApiResponse({ status: 401, description: 'Unauthorized' })
 @UseGuards(JwtAuthGuard)
-async levelDown(@CurrentUser() user: any, @Param('xp') xp: number) {
+async isOffreLiked(
+  @CurrentUser() user: any,
+  @Param('offreId') offreId: string
+) {
   const id = user.userId || user._id || user.id;
-  return this.userService.levelDown(id, xp);
+  const isLiked = await this.userService.isOffreLiked(id, offreId);
+  
+  return { isLiked };
 }
 
-@Get('trust/level')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Get current trust level and text' })
-@ApiResponse({ status: 200, description: 'Returns trust level information' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-async getTrustLevel(@CurrentUser() user: any) {
-  const id = user.userId || user._id || user.id;
-  return this.userService.getTrustLevel(id);
-}
 
-@Patch('organization/toggle')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Toggle organization status' })
-@ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-async toggleOrganization(@CurrentUser() user: any) {
-  const id = user.userId || user._id || user.id;
-  return this.userService.toggleOrganization(id);
-}
+  @Get(':id/trust/level')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get trust level for any user' })
+  @ApiResponse({ status: 200, description: 'Returns trust level information' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Admin Only' })
+  @UseGuards(JwtAuthGuard)
+  async getTrustLevel2(@Param('id') id: string) {
+    return this.userService.getTrustLevel(id);
+  }
+
 }

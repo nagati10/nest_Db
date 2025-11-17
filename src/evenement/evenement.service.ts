@@ -47,7 +47,8 @@ export class EvenementService {
       throw new NotFoundException(`Événement avec ID ${id} non trouvé`);
     }
 
-    if (evenement.userId.toString() !== userId) {
+    // Fix: Convert both to string for consistent comparison
+    if (evenement.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cet événement');
     }
 
@@ -61,7 +62,8 @@ export class EvenementService {
       throw new NotFoundException(`Événement avec ID ${id} non trouvé`);
     }
 
-    if (evenement.userId.toString() !== userId) {
+    // Fix: Convert both to string for consistent comparison
+    if (evenement.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cet événement');
     }
 
@@ -69,7 +71,6 @@ export class EvenementService {
       .findByIdAndUpdate(id, updateEvenementDto, { new: true })
       .exec();
 
-    // Add null check after update
     if (!updatedEvenement) {
       throw new NotFoundException(`Événement avec ID ${id} non trouvé après mise à jour`);
     }
@@ -84,13 +85,13 @@ export class EvenementService {
       throw new NotFoundException(`Événement avec ID ${id} non trouvé`);
     }
 
-    if (evenement.userId.toString() !== userId) {
+    // Fix: Convert both to string for consistent comparison
+    if (evenement.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cet événement');
     }
 
     const deletedEvenement = await this.evenementModel.findByIdAndDelete(id).exec();
     
-    // Add null check after deletion
     if (!deletedEvenement) {
       throw new NotFoundException(`Événement avec ID ${id} non trouvé après suppression`);
     }

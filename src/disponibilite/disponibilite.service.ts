@@ -47,7 +47,8 @@ export class DisponibiliteService {
       throw new NotFoundException(`Disponibilité avec ID ${id} non trouvée`);
     }
 
-    if (disponibilite.userId.toString() !== userId) {
+    // Fix: Convert both to string for consistent comparison
+    if (disponibilite.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cette disponibilité');
     }
 
@@ -61,7 +62,8 @@ export class DisponibiliteService {
       throw new NotFoundException(`Disponibilité avec ID ${id} non trouvée`);
     }
 
-    if (disponibilite.userId.toString() !== userId) {
+    // Fix: Convert both to string for consistent comparison
+    if (disponibilite.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cette disponibilité');
     }
 
@@ -69,7 +71,6 @@ export class DisponibiliteService {
       .findByIdAndUpdate(id, updateDisponibiliteDto, { new: true })
       .exec();
 
-    // Add null check after update
     if (!updatedDisponibilite) {
       throw new NotFoundException(`Disponibilité avec ID ${id} non trouvée après mise à jour`);
     }
@@ -84,13 +85,13 @@ export class DisponibiliteService {
       throw new NotFoundException(`Disponibilité avec ID ${id} non trouvée`);
     }
 
-    if (disponibilite.userId.toString() !== userId) {
+    // Fix: Convert both to string for consistent comparison
+    if (disponibilite.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cette disponibilité');
     }
 
     const deletedDisponibilite = await this.disponibiliteModel.findByIdAndDelete(id).exec();
     
-    // Add null check after deletion
     if (!deletedDisponibilite) {
       throw new NotFoundException(`Disponibilité avec ID ${id} non trouvée après suppression`);
     }

@@ -31,6 +31,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import path from 'path';
+import { Types } from 'mongoose';
 
 @ApiTags('chat')
 @Controller('chat')
@@ -58,25 +59,30 @@ export class ChatController {
     }
   }
 
-  @Post(':chatId/message')
-  @ApiOperation({ summary: 'Send message in chat' })
-  @ApiResponse({ status: 201, description: 'Message sent successfully' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
-  @ApiResponse({ status: 403, description: 'Chat blocked or access denied' })
-  async sendMessage(
-    @Param('chatId') chatId: string,
-    @Body() sendMessageDto: SendMessageDto,
-    @CurrentUser() user: any,
-  ) {
-    try {
-      return await this.chatService.sendMessage(chatId, user._id, sendMessageDto);
-    } catch (error) {
-      if (error.status === 404 || error.status === 403) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem sending message', HttpStatus.INTERNAL_SERVER_ERROR);
+@Post(':chatId/message')
+@ApiOperation({ summary: 'Send message in chat' })
+@ApiResponse({ status: 201, description: 'Message sent successfully' })
+@ApiResponse({ status: 404, description: 'Chat not found' })
+@ApiResponse({ status: 403, description: 'Chat blocked or access denied' })
+async sendMessage(
+  @Param('chatId') chatId: string,
+  @Body() sendMessageDto: SendMessageDto,
+  @CurrentUser() user: any,
+) {
+  try {
+    const message = await this.chatService.sendMessage(chatId, user._id, sendMessageDto);
+    return {
+      success: true,
+      data: message,
+      message: 'Message sent successfully'
+    };
+  } catch (error) {
+    if (error.status === 404 || error.status === 403) {
+      throw new HttpException(error.message, error.status);
     }
+    throw new HttpException('Problem sending message', HttpStatus.INTERNAL_SERVER_ERROR);
   }
+}
 
   @Get('my-chats')
   @ApiOperation({ summary: 'Get all user chats' })
@@ -85,25 +91,30 @@ export class ChatController {
     return await this.chatService.getUserChats(user._id);
   }
 
-  @Get(':chatId/messages')
-  @ApiOperation({ summary: 'Get chat messages with pagination' })
-  @ApiResponse({ status: 200, description: 'Returns chat messages' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
-  async getChatMessages(
-    @Param('chatId') chatId: string,
-    @CurrentUser() user: any,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 50,
-  ) {
-    try {
-      return await this.chatService.getChatMessages(chatId, user._id, page, limit);
-    } catch (error) {
-      if (error.status === 404) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem fetching messages', HttpStatus.INTERNAL_SERVER_ERROR);
+@Get(':chatId/messages')
+@ApiOperation({ summary: 'Get chat messages with pagination' })
+@ApiResponse({ status: 200, description: 'Returns chat messages' })
+@ApiResponse({ status: 404, description: 'Chat not found' })
+async getChatMessages(
+  @Param('chatId') chatId: string,
+  @CurrentUser() user: any,
+  @Query('page') page: number = 1,
+  @Query('limit') limit: number = 50,
+) {
+  try {
+    const result = await this.chatService.getChatMessages(chatId, user._id, page, limit);
+    return {
+      success: true,
+      data: result,
+      message: 'Messages retrieved successfully'
+    };
+  } catch (error) {
+    if (error.status === 404) {
+      throw new HttpException(error.message, error.status);
     }
+    throw new HttpException('Problem fetching messages', HttpStatus.INTERNAL_SERVER_ERROR);
   }
+}
 
   @Get(':chatId')
   @ApiOperation({ summary: 'Get chat by ID' })
@@ -308,5 +319,23 @@ async uploadMedia(
   }
 }
 
+@Patch(':chatId/mark-read')
+@ApiOperation({ summary: 'Mark messages as read' })
+@ApiResponse({ status: 200, description: 'Messages marked as read' })
+@ApiResponse({ status: 404, description: 'Chat not found' })
+@ApiResponse({ status: 403, description: 'Access denied' })
+async markMessagesAsRead(
+  @Param('chatId') chatId: string,
+  @CurrentUser() user: any,
+) {
+  try {
+    return await this.chatService.markMessagesAsRead(chatId, user._id);
+  } catch (error) {
+    if (error.status === 404 || error.status === 403) {
+      throw new HttpException(error.message, error.status);
+    }
+    throw new HttpException('Problem marking messages as read', HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+}
 
 }

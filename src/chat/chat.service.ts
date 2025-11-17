@@ -80,62 +80,71 @@ export class ChatService {
     }
   }
 
-  async sendMessage(chatId: string, senderId: string, sendMessageDto: SendMessageDto): Promise<MessageDocument> {
-    try {
-      // Find chat and validate
-      const chat = await this.chatModel.findById(chatId).exec();
-      if (!chat) {
-        throw new NotFoundException('Chat not found');
-      }
-
-      if (chat.isBlocked) {
-        throw new ForbiddenException('This chat is blocked');
-      }
-
-      if (chat.isDeleted) {
-        throw new ForbiddenException('This chat is deleted');
-      }
-
-      // Verify sender is participant
-      const senderObjectId = new Types.ObjectId(senderId);
-      if (!chat.candidate.equals(senderObjectId) && !chat.entreprise.equals(senderObjectId)) {
-        throw new ForbiddenException('You are not a participant in this chat');
-      }
-
-      // Create message
-      const messageData = {
-        chat: new Types.ObjectId(chatId),
-        sender: senderObjectId,
-        ...sendMessageDto
-      };
-
-      const createdMessage = new this.messageModel(messageData);
-      const savedMessage = await createdMessage.save();
-
-      // Update chat last activity and last message
-      const lastMessage = sendMessageDto.type === MessageType.TEXT 
-        ? sendMessageDto.content 
-        : `${sendMessageDto.type} message`;
-
-      await this.chatModel.findByIdAndUpdate(chatId, {
-        lastActivity: new Date(),
-        lastMessage: lastMessage?.substring(0, 100), // Truncate long messages
-        lastMessageType: sendMessageDto.type,
-        // Increment unread count for the other participant
-        $inc: {
-          unreadCandidate: chat.entreprise.equals(senderObjectId) ? 1 : 0,
-          unreadEntreprise: chat.candidate.equals(senderObjectId) ? 1 : 0
-        }
-      }).exec();
-
-      return savedMessage;
-    } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Problem sending message');
+async sendMessage(chatId: string, senderId: string, sendMessageDto: SendMessageDto): Promise<MessageDocument> {
+  try {
+    // Find chat and validate
+    const chat = await this.chatModel.findById(chatId).exec();
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
     }
+
+    if (chat.isBlocked) {
+      throw new ForbiddenException('This chat is blocked');
+    }
+
+    if (chat.isDeleted) {
+      throw new ForbiddenException('This chat is deleted');
+    }
+
+    // Verify sender is participant
+    const senderObjectId = new Types.ObjectId(senderId);
+    if (!chat.candidate.equals(senderObjectId) && !chat.entreprise.equals(senderObjectId)) {
+      throw new ForbiddenException('You are not a participant in this chat');
+    }
+
+    // Create message
+    const messageData = {
+      chat: new Types.ObjectId(chatId),
+      sender: senderObjectId,
+      ...sendMessageDto
+    };
+
+    const createdMessage = new this.messageModel(messageData);
+    const savedMessage = await createdMessage.save();
+
+    // Update chat last activity and last message
+    const lastMessage = sendMessageDto.type === MessageType.TEXT 
+      ? sendMessageDto.content 
+      : `${sendMessageDto.type} message`;
+
+    await this.chatModel.findByIdAndUpdate(chatId, {
+      lastActivity: new Date(),
+      lastMessage: lastMessage?.substring(0, 100),
+      lastMessageType: sendMessageDto.type,
+      $inc: {
+        unreadCandidate: chat.entreprise.equals(senderObjectId) ? 1 : 0,
+        unreadEntreprise: chat.candidate.equals(senderObjectId) ? 1 : 0
+      }
+    }).exec();
+
+    // Return the populated message
+    const populatedMessage = await this.messageModel
+      .findById(savedMessage._id)
+      .populate('sender', 'nom email image')
+      .exec();
+
+    if (!populatedMessage) {
+      throw new InternalServerErrorException('Failed to retrieve sent message');
+    }
+
+    return populatedMessage;
+  } catch (error) {
+    if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+      throw error;
+    }
+    throw new InternalServerErrorException('Problem sending message');
   }
+}
 
   async getChatMessages(chatId: string, userId: string, page: number = 1, limit: number = 50): Promise<{ messages: MessageDocument[], total: number }> {
     try {
@@ -434,4 +443,46 @@ export class ChatService {
       throw new InternalServerErrorException('Problem fetching chat');
     }
   }
+
+  async markMessagesAsRead(chatId: string, userId: string): Promise<{ message: string }> {
+  try {
+    const chat = await this.chatModel.findById(chatId).exec();
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    // Verify user has access to chat
+    const userObjectId = new Types.ObjectId(userId);
+    if (!chat.candidate.equals(userObjectId) && !chat.entreprise.equals(userObjectId)) {
+      throw new ForbiddenException('You are not a participant in this chat');
+    }
+
+    // Reset unread count for this user
+    const unreadField = chat.candidate.equals(userObjectId) ? 'unreadCandidate' : 'unreadEntreprise';
+    
+    await this.chatModel.findByIdAndUpdate(chatId, {
+      [unreadField]: 0
+    }).exec();
+
+    // Mark messages as read
+    await this.messageModel.updateMany(
+      {
+        chat: new Types.ObjectId(chatId),
+        sender: { $ne: userObjectId },
+        isRead: false
+      },
+      {
+        isRead: true,
+        readAt: new Date()
+      }
+    ).exec();
+
+    return { message: 'Messages marked as read' };
+  } catch (error) {
+    if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+      throw error;
+    }
+    throw new InternalServerErrorException('Problem marking messages as read');
+  }
+}
 }

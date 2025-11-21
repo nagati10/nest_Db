@@ -7,10 +7,8 @@ import {
   Param,
   Query,
   UseGuards,
-  HttpException,
-  HttpStatus,
-  Delete,
   Patch,
+  Delete,
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
@@ -31,7 +29,6 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import path from 'path';
-import { Types } from 'mongoose';
 
 @ApiTags('chat')
 @Controller('chat')
@@ -42,154 +39,91 @@ export class ChatController {
 
   @Post()
   @ApiOperation({ summary: 'Create or get existing chat' })
-  @ApiResponse({ status: 201, description: 'Chat created or retrieved successfully' })
-  @ApiResponse({ status: 404, description: 'User or offer not found' })
-  @ApiResponse({ status: 403, description: 'User blocked from offer' })
+  @ApiResponse({ status: 200, description: 'Chat created or retrieved successfully' })
   async createOrGetChat(
     @Body() createChatDto: CreateChatDto,
     @CurrentUser() user: any,
   ) {
-    try {
-      return await this.chatService.createOrGetChat(createChatDto, user._id);
-    } catch (error) {
-      if (error.status === 404 || error.status === 403) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem creating chat', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.createOrGetChat(createChatDto, userId);
   }
 
-@Post(':chatId/message')
-@ApiOperation({ summary: 'Send message in chat' })
-@ApiResponse({ status: 201, description: 'Message sent successfully' })
-@ApiResponse({ status: 404, description: 'Chat not found' })
-@ApiResponse({ status: 403, description: 'Chat blocked or access denied' })
-async sendMessage(
-  @Param('chatId') chatId: string,
-  @Body() sendMessageDto: SendMessageDto,
-  @CurrentUser() user: any,
-) {
-  try {
-    const message = await this.chatService.sendMessage(chatId, user._id, sendMessageDto);
-    return {
-      success: true,
-      data: message,
-      message: 'Message sent successfully'
-    };
-  } catch (error) {
-    if (error.status === 404 || error.status === 403) {
-      throw new HttpException(error.message, error.status);
-    }
-    throw new HttpException('Problem sending message', HttpStatus.INTERNAL_SERVER_ERROR);
+  @Post(':chatId/message')
+  @ApiOperation({ summary: 'Send message in chat' })
+  @ApiResponse({ status: 200, description: 'Message sent successfully' })
+  async sendMessage(
+    @Param('chatId') chatId: string,
+    @Body() sendMessageDto: SendMessageDto,
+    @CurrentUser() user: any,
+  ) {
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.sendMessage(chatId, userId, sendMessageDto);
   }
-}
 
   @Get('my-chats')
   @ApiOperation({ summary: 'Get all user chats' })
   @ApiResponse({ status: 200, description: 'Returns user chats' })
   async getUserChats(@CurrentUser() user: any) {
-    return await this.chatService.getUserChats(user._id);
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.getUserChats(userId);
   }
 
-@Get(':chatId/messages')
-@ApiOperation({ summary: 'Get chat messages with pagination' })
-@ApiResponse({ status: 200, description: 'Returns chat messages' })
-@ApiResponse({ status: 404, description: 'Chat not found' })
-async getChatMessages(
-  @Param('chatId') chatId: string,
-  @CurrentUser() user: any,
-  @Query('page') page: number = 1,
-  @Query('limit') limit: number = 50,
-) {
-  try {
-    const result = await this.chatService.getChatMessages(chatId, user._id, page, limit);
-    return {
-      success: true,
-      data: result,
-      message: 'Messages retrieved successfully'
-    };
-  } catch (error) {
-    if (error.status === 404) {
-      throw new HttpException(error.message, error.status);
-    }
-    throw new HttpException('Problem fetching messages', HttpStatus.INTERNAL_SERVER_ERROR);
+  @Get(':chatId/messages')
+  @ApiOperation({ summary: 'Get chat messages with pagination' })
+  @ApiResponse({ status: 200, description: 'Returns chat messages' })
+  async getChatMessages(
+    @Param('chatId') chatId: string,
+    @CurrentUser() user: any,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 50,
+  ) {
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.getChatMessages(chatId, userId, page, limit);
   }
-}
 
   @Get(':chatId')
   @ApiOperation({ summary: 'Get chat by ID' })
   @ApiResponse({ status: 200, description: 'Returns chat' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
   async getChatById(
     @Param('chatId') chatId: string,
     @CurrentUser() user: any,
   ) {
-    try {
-      return await this.chatService.getChatById(chatId, user._id);
-    } catch (error) {
-      if (error.status === 404) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem fetching chat', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.getChatById(chatId, userId);
   }
 
   @Patch(':chatId/block')
   @ApiOperation({ summary: 'Block chat (entreprise only)' })
   @ApiResponse({ status: 200, description: 'Chat blocked successfully' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
-  @ApiResponse({ status: 403, description: 'Only entreprise can block' })
   async blockChat(
     @Param('chatId') chatId: string,
     @CurrentUser() user: any,
     @Body() updateChatDto: UpdateChatDto,
   ) {
-    try {
-      return await this.chatService.blockChat(chatId, user._id, updateChatDto.blockReason);
-    } catch (error) {
-      if (error.status === 404 || error.status === 403) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem blocking chat', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.blockChat(chatId, userId, updateChatDto.blockReason);
   }
 
   @Patch(':chatId/unblock')
   @ApiOperation({ summary: 'Unblock chat (entreprise only)' })
   @ApiResponse({ status: 200, description: 'Chat unblocked successfully' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
-  @ApiResponse({ status: 403, description: 'Only entreprise can unblock' })
   async unblockChat(
     @Param('chatId') chatId: string,
     @CurrentUser() user: any,
   ) {
-    try {
-      return await this.chatService.unblockChat(chatId, user._id);
-    } catch (error) {
-      if (error.status === 404 || error.status === 403) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem unblocking chat', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.unblockChat(chatId, userId);
   }
 
   @Patch(':chatId/accept')
   @ApiOperation({ summary: 'Accept candidate (entreprise only)' })
   @ApiResponse({ status: 200, description: 'Candidate accepted successfully' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
-  @ApiResponse({ status: 403, description: 'Only entreprise can accept' })
   async acceptCandidate(
     @Param('chatId') chatId: string,
     @CurrentUser() user: any,
   ) {
-    try {
-      return await this.chatService.acceptCandidate(chatId, user._id);
-    } catch (error) {
-      if (error.status === 404 || error.status === 403) {
-        throw new HttpException(error.message, error.status);
-      }
-      throw new HttpException('Problem accepting candidate', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.acceptCandidate(chatId, userId);
   }
 
   @Get('can-call/:offerId')
@@ -199,143 +133,77 @@ async getChatMessages(
     @Param('offerId') offerId: string,
     @CurrentUser() user: any,
   ) {
-    try {
-      const canCall = await this.chatService.canMakeCall(offerId, user._id);
-      return { canCall };
-    } catch (error) {
-      throw new HttpException('Problem checking call permission', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.canMakeCall(offerId, userId);
   }
 
   @Delete(':chatId')
   @ApiOperation({ summary: 'Delete chat' })
   @ApiResponse({ status: 200, description: 'Chat deleted successfully' })
-  @ApiResponse({ status: 404, description: 'Chat not found' })
-  @ApiResponse({ status: 403, description: 'Access denied' })
   async deleteChat(
     @Param('chatId') chatId: string,
     @CurrentUser() user: any,
   ) {
-    try {
-      return await this.chatService.deleteChat(chatId, user._id);
-    } catch (error) {
-      if (error.status === 404 || error.status === 403) {
-        throw new HttpException(error.message, error.status);
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.deleteChat(chatId, userId);
+  }
+
+  @Post('upload')
+  @ApiOperation({ summary: 'Upload chat media file' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'Chat media file (image, video, audio)',
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Media file to upload (image, video, or audio)',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({
+      destination: './uploads/chat',
+      filename: (req, file, cb) => {
+        const uniqueName = `chat-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
+        cb(null, uniqueName);
       }
-      throw new HttpException('Problem deleting chat', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-// Add to chat.controller.ts
-// In chat.controller.ts
-@Post('upload')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Upload chat media file' })
-@ApiConsumes('multipart/form-data')
-@ApiBody({
-  description: 'Chat media file (image, video, audio)',
-  type: 'multipart/form-data',
-  schema: {
-    type: 'object',
-    properties: {
-      file: {
-        type: 'string',
-        format: 'binary',
-      },
+    }),
+    fileFilter: (req, file, cb) => {
+      if (file.mimetype.startsWith('image/') || 
+          file.mimetype.startsWith('video/') || 
+          file.mimetype.startsWith('audio/')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only image, video, and audio files are allowed'), false);
+      }
     },
-  },
-})
-
-
-
-
-
-@Post('upload')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Upload chat media file' })
-@ApiConsumes('multipart/form-data')
-@ApiBody({
-  description: 'Chat media file (image, video, audio)',
-  schema: {
-    type: 'object',
-    properties: {
-      file: {
-        type: 'string',
-        format: 'binary',
-        description: 'Media file to upload (image, video, or audio)',
-      },
-    },
-    required: ['file'],
-  },
-})
-@ApiResponse({ status: 201, description: 'File uploaded successfully' })
-@ApiResponse({ status: 400, description: 'Invalid file type' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-@UseInterceptors(FileInterceptor('file', {
-  storage: diskStorage({
-    destination: './uploads/chat',
-    filename: (req, file, cb) => {
-      const uniqueName = `chat-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-      cb(null, uniqueName);
+    limits: {
+      fileSize: 50 * 1024 * 1024,
     }
-  }),
-  fileFilter: (req, file, cb) => {
-    // Allow images, videos, and audio files
-    if (file.mimetype.startsWith('image/') || 
-        file.mimetype.startsWith('video/') || 
-        file.mimetype.startsWith('audio/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image, video, and audio files are allowed'), false);
-    }
-  },
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB for videos
-  }
-}))
-async uploadMedia(
-  @UploadedFile() file: Express.Multer.File,
-  @CurrentUser() user: any,
-) {
-  try {
-    if (!file) {
-      throw new HttpException('File is required', HttpStatus.BAD_REQUEST);
-    }
-
-    // Get the base URL (you might want to configure this properly for production)
+  }))
+  async uploadMedia(@UploadedFile() file: Express.Multer.File) {
     const baseUrl = process.env.BASE_URL || 'http://localhost:3005';
     
     return {
-      url: `${baseUrl}/uploads/chat/${file.filename}`, // Full URL for client access
+      url: `${baseUrl}/uploads/chat/${file.filename}`,
       fileName: file.originalname,
       fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`
     };
-  } catch (error) {
-    if (error.status === 400) {
-      throw new HttpException(error.message, error.status);
-    }
-    throw new HttpException('Problem uploading file', HttpStatus.INTERNAL_SERVER_ERROR);
   }
-}
 
-@Patch(':chatId/mark-read')
-@ApiOperation({ summary: 'Mark messages as read' })
-@ApiResponse({ status: 200, description: 'Messages marked as read' })
-@ApiResponse({ status: 404, description: 'Chat not found' })
-@ApiResponse({ status: 403, description: 'Access denied' })
-async markMessagesAsRead(
-  @Param('chatId') chatId: string,
-  @CurrentUser() user: any,
-) {
-  try {
-    return await this.chatService.markMessagesAsRead(chatId, user._id);
-  } catch (error) {
-    if (error.status === 404 || error.status === 403) {
-      throw new HttpException(error.message, error.status);
-    }
-    throw new HttpException('Problem marking messages as read', HttpStatus.INTERNAL_SERVER_ERROR);
+  @Patch(':chatId/mark-read')
+  @ApiOperation({ summary: 'Mark messages as read' })
+  @ApiResponse({ status: 200, description: 'Messages marked as read' })
+  async markMessagesAsRead(
+    @Param('chatId') chatId: string,
+    @CurrentUser() user: any,
+  ) {
+    const userId = user.userId || user._id || user.id;
+    return this.chatService.markMessagesAsRead(chatId, userId);
   }
-}
-
 }

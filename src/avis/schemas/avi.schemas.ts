@@ -9,6 +9,10 @@ export class Avis {
   @ApiProperty({ description: 'Identifiant' })
   _id: string;
 
+  @ApiProperty({ description: 'L\'utilisateur concerné' })
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  userId: Types.ObjectId;
+
   @ApiProperty({ description: 'Nom de la personne qui donne l\'avis', example: 'John Doe' })
   @Prop({ required: true })
   nom: string;

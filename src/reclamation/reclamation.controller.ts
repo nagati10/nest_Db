@@ -32,8 +32,7 @@ export class ReclamationController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Récupérer toutes les réclamations (Admin seulement)' })
   @ApiResponse({ status: 200, description: 'Liste de toutes les réclamations' })
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @UseGuards(JwtAuthGuard)
   async findAll() {
     return this.reclamationService.findAll();
   }
@@ -52,8 +51,7 @@ export class ReclamationController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Récupérer les réclamations par type' })
   @ApiResponse({ status: 200, description: 'Liste des réclamations du type spécifié' })
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @UseGuards(JwtAuthGuard)
   async findByType(@Param('type') type: ReclamationType) {
     return this.reclamationService.findByType(type);
   }
@@ -62,8 +60,7 @@ export class ReclamationController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtenir les statistiques par type de réclamation' })
   @ApiResponse({ status: 200, description: 'Statistiques par type' })
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @UseGuards(JwtAuthGuard)
   async getTypeStats() {
     return this.reclamationService.getStats();
   }
@@ -72,8 +69,7 @@ export class ReclamationController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtenir les statistiques par statut de réclamation' })
   @ApiResponse({ status: 200, description: 'Statistiques par statut' })
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @UseGuards(JwtAuthGuard)
   async getStatusStats() {
     return this.reclamationService.getStatusStats();
   }

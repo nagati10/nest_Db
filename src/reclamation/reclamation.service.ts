@@ -43,9 +43,16 @@ export class ReclamationService {
       throw new NotFoundException(`Réclamation avec ID ${id} non trouvée`);
     }
 
-    // If userId is provided, check if the user owns this reclamation
-    if (userId && reclamation.userId && reclamation.userId._id.toString() !== userId) {
-      throw new ForbiddenException('Accès non autorisé à cette réclamation');
+    // FIXED: Proper user ID comparison for populated userId
+    if (userId && reclamation.userId) {
+      // When populated, userId becomes an object with _id property
+      const reclamationUserId = (reclamation.userId as any)._id 
+        ? (reclamation.userId as any)._id.toString() 
+        : reclamation.userId.toString();
+      
+      if (reclamationUserId !== userId.toString()) {
+        throw new ForbiddenException('Accès non autorisé à cette réclamation');
+      }
     }
 
     return reclamation;
@@ -58,8 +65,8 @@ export class ReclamationService {
       throw new NotFoundException(`Réclamation avec ID ${id} non trouvée`);
     }
 
-    // If userId is provided, check if the user owns this reclamation
-    if (userId && reclamation.userId && reclamation.userId.toString() !== userId) {
+    // FIXED: User ownership check
+    if (userId && reclamation.userId && reclamation.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cette réclamation');
     }
 
@@ -90,7 +97,7 @@ export class ReclamationService {
     }
 
     // If userId is provided, check if the user owns this reclamation
-    if (userId && reclamation.userId && reclamation.userId.toString() !== userId) {
+    if (userId && reclamation.userId && reclamation.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cette réclamation');
     }
 
@@ -119,7 +126,7 @@ export class ReclamationService {
     }
 
     // If userId is provided, check if the user owns this reclamation
-    if (userId && reclamation.userId && reclamation.userId.toString() !== userId) {
+    if (userId && reclamation.userId && reclamation.userId.toString() !== userId.toString()) {
       throw new ForbiddenException('Accès non autorisé à cette réclamation');
     }
 

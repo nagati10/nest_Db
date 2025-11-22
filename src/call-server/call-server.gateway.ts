@@ -130,6 +130,112 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
     }
   }
 
+  // In call-server.gateway.ts - Add these methods
+
+@SubscribeMessage('call-request')
+handleCallRequest(client: Socket, data: any) {
+  const { roomId, fromUserId, fromUserName, toUserId, isVideoCall } = data;
+  
+  console.log(`Call request from ${fromUserName} to ${toUserId} in room ${roomId}`);
+  
+  // Find the target user's socket
+  let targetSocketId: string | null = null;
+  
+  // Search through all rooms to find the target user
+  for (const [room, users] of this.rooms.entries()) {
+    for (const [socketId, userData] of users.entries()) {
+      if (userData.userId === toUserId) {
+        targetSocketId = socketId;
+        break;
+      }
+    }
+    if (targetSocketId) break;
+  }
+  
+  if (targetSocketId) {
+    // Send call request to the target user
+    client.to(targetSocketId).emit('incoming-call', {
+      roomId,
+      fromUserId,
+      fromUserName,
+      isVideoCall,
+      callId: `call_${Date.now()}`
+    });
+    
+    client.emit('call-request-sent', { success: true });
+  } else {
+    client.emit('call-request-failed', { 
+      reason: 'User not available or offline' 
+    });
+  }
+}
+
+@SubscribeMessage('call-response')
+handleCallResponse(client: Socket, data: any) {
+  const { roomId, toUserId, accepted, callId } = data;
+  
+  console.log(`Call response: ${accepted ? 'Accepted' : 'Rejected'} for call ${callId}`);
+  
+  // Find the target user's socket (the caller)
+  let targetSocketId: string | null = null;
+  
+  for (const [room, users] of this.rooms.entries()) {
+    for (const [socketId, userData] of users.entries()) {
+      if (userData.userId === toUserId) {
+        targetSocketId = socketId;
+        break;
+      }
+    }
+    if (targetSocketId) break;
+  }
+  
+  if (targetSocketId) {
+    client.to(targetSocketId).emit('call-response', {
+      accepted,
+      callId,
+      fromUserId: this.getUserIdBySocketId(client.id)
+    });
+    
+    if (accepted) {
+      // Notify both users to join the room
+      client.emit('join-call-room', { roomId });
+      client.to(targetSocketId).emit('join-call-room', { roomId });
+    }
+  }
+}
+
+@SubscribeMessage('cancel-call')
+handleCancelCall(client: Socket, data: any) {
+  const { callId, toUserId } = data;
+  
+  // Find the target user's socket
+  let targetSocketId: string | null = null;
+  
+  for (const [room, users] of this.rooms.entries()) {
+    for (const [socketId, userData] of users.entries()) {
+      if (userData.userId === toUserId) {
+        targetSocketId = socketId;
+        break;
+      }
+    }
+    if (targetSocketId) break;
+  }
+  
+  if (targetSocketId) {
+    client.to(targetSocketId).emit('call-cancelled', { callId });
+  }
+}
+
+// Helper method to get user ID by socket ID
+private getUserIdBySocketId(socketId: string): string | null {
+  for (const [roomId, users] of this.rooms.entries()) {
+    if (users.has(socketId)) {
+      return users.get(socketId).userId;
+    }
+  }
+  return null;
+}
+
   private findRoomBySocketId(socketId: string): string | null {
     for (const [roomId, users] of this.rooms.entries()) {
       if (users.has(socketId)) {

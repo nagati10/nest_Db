@@ -331,18 +331,23 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
   @SubscribeMessage('offer')
   handleOffer(client: Socket, data: any) {
     try {
-      const { offer, toSocketId, roomId } = data;
+      const { offer, roomId } = data;
       
-      if (!offer || !toSocketId) {
+      if (!offer || !roomId) {
+        console.log('❌ Offer failed: missing offer or roomId');
         return;
       }
 
-      console.log(`📤 Offer from ${client.id} to ${toSocketId}`);
-      client.to(toSocketId).emit('offer', {
+      console.log(`📤 Offer from ${client.id} in room ${roomId}`);
+      
+      // Broadcast to all other users in the room
+      client.to(roomId).emit('offer', {
         offer,
         fromSocketId: client.id,
         roomId
       });
+      
+      console.log(`✅ Offer broadcasted to room ${roomId}`);
     } catch (error) {
       console.error('❌ Offer error:', error);
     }
@@ -351,18 +356,23 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
   @SubscribeMessage('answer')
   handleAnswer(client: Socket, data: any) {
     try {
-      const { answer, toSocketId, roomId } = data;
+      const { answer, roomId } = data;
       
-      if (!answer || !toSocketId) {
+      if (!answer || !roomId) {
+        console.log('❌ Answer failed: missing answer or roomId');
         return;
       }
 
-      console.log(`📥 Answer from ${client.id} to ${toSocketId}`);
-      client.to(toSocketId).emit('answer', {
+      console.log(`📥 Answer from ${client.id} in room ${roomId}`);
+      
+      // Broadcast to all other users in the room
+      client.to(roomId).emit('answer', {
         answer,
         fromSocketId: client.id,
         roomId
       });
+      
+      console.log(`✅ Answer broadcasted to room ${roomId}`);
     } catch (error) {
       console.error('❌ Answer error:', error);
     }
@@ -371,17 +381,23 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
   @SubscribeMessage('ice-candidate')
   handleIceCandidate(client: Socket, data: any) {
     try {
-      const { candidate, toSocketId, roomId } = data;
+      const { candidate, roomId } = data;
       
-      if (!candidate || !toSocketId) {
+      if (!candidate || !roomId) {
+        console.log('❌ ICE candidate failed: missing candidate or roomId');
         return;
       }
 
-      client.to(toSocketId).emit('ice-candidate', {
+      console.log(`🧊 ICE candidate from ${client.id} in room ${roomId}`);
+      
+      // Broadcast to all other users in the room
+      client.to(roomId).emit('ice-candidate', {
         candidate,
         fromSocketId: client.id,
         roomId
       });
+      
+      console.log(`✅ ICE candidate broadcasted to room ${roomId}`);
     } catch (error) {
       console.error('❌ ICE candidate error:', error);
     }

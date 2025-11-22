@@ -136,8 +136,21 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
 handleCallRequest(client: Socket, data: any) {
   const { roomId, fromUserId, fromUserName, toUserId, isVideoCall } = data;
   
-  console.log(`Call request from ${fromUserName} to ${toUserId} in room ${roomId}`);
+  console.log('🔔 CALL_REQUEST_RECEIVED:', {
+    roomId,
+    fromUserId,
+    fromUserName,
+    toUserId,
+    isVideoCall,
+    clientId: client.id
+  });
   
+  // Log all connected users for debugging
+  console.log('👥 Currently connected users:');
+  this.rooms.forEach((users, roomId) => {
+    console.log(`Room ${roomId}:`, Array.from(users.entries()));
+  });
+    
   // Find the target user's socket
   let targetSocketId: string | null = null;
   

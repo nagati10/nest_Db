@@ -88,7 +88,7 @@ export class UserService {
       const users = await this.userModel.find().exec();
       const result = await this.userModel.deleteMany({}).exec();
       
-      console.log(`🗑️ Deleted ${result.deletedCount} users`);
+      //console.log(`🗑️ Deleted ${result.deletedCount} users`);
       return {
         message: `Successfully deleted ${result.deletedCount} users`,
         deletedCount: result.deletedCount,

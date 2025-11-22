@@ -14,11 +14,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: any) {
-    console.log('🔐 JWT Strategy - payload:', payload);
+    //console.log('🔐 JWT Strategy - payload:', payload);
     const user = await this.UserService.findOne(payload.sub);
-    console.log('👤 JWT Strategy - found user:', user);
+    //console.log('👤 JWT Strategy - found user:', user);
     if (!user) return null;
-    console.log('✅ JWT Strategy - returning user');
+    //console.log('✅ JWT Strategy - returning user');
     return user;
   }
 }

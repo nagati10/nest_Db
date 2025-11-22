@@ -48,17 +48,17 @@ export class AuthService {
 
 async googleLogin(idToken: string) {
   try {
-    console.log('🔐 Starting Google login with token:', idToken.substring(0, 20) + '...');
+    //console.log('🔐 Starting Google login with token:', idToken.substring(0, 20) + '...');
 
     // Verify Google token
     const ticket = await this.googleClient.verifyIdToken({
       idToken: idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
-    console.log('✅ Google token verified');
+    //console.log('✅ Google token verified');
 
     const payload = ticket.getPayload();
-    console.log('📧 Google payload:', payload);
+    //console.log('📧 Google payload:', payload);
 
     if (!payload) {
       throw new UnauthorizedException('Invalid Google token: no payload');
@@ -72,14 +72,14 @@ async googleLogin(idToken: string) {
       throw new UnauthorizedException('Invalid Google token: no email provided');
     }
 
-    console.log('👤 Looking for user with email:', email);
+    //console.log('👤 Looking for user with email:', email);
     
     // Find or create user in MongoDB
     let user = await this.userService.findByEmail(email);
-    console.log('🔍 User search result:', user);
+    //console.log('🔍 User search result:', user);
     
     if (!user) {
-      console.log('🆕 Creating new user for email:', email);
+      //console.log('🆕 Creating new user for email:', email);
       user = await this.userService.create({
         nom: name || 'Google User',
         email: email,
@@ -88,13 +88,13 @@ async googleLogin(idToken: string) {
         role: Role.USER,
         image: picture || '',
       });
-      console.log('✅ New user created:', user);
+      //console.log('✅ New user created:', user);
     }
 
-    console.log('🎫 Generating JWT token for user:', user.email);
+    //console.log('🎫 Generating JWT token for user:', user.email);
     // Generate JWT token using existing login method
     const result = this.login(user);
-    console.log('✅ Google login successful');
+    //console.log('✅ Google login successful');
     return result;
 
   } catch (error) {

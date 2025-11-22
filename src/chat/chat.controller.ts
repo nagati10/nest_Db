@@ -186,9 +186,11 @@ export class ChatController {
       fileSize: 50 * 1024 * 1024,
     }
   }))
-  async uploadMedia(@UploadedFile() file: Express.Multer.File) {    
+  async uploadMedia(@UploadedFile() file: Express.Multer.File) {
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3005';
+    
     return {
-      url: `uploads/chat/${file.filename}`,
+      url: `${baseUrl}/uploads/chat/${file.filename}`,
       fileName: file.originalname,
       fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`
     };

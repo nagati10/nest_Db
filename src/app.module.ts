@@ -12,12 +12,14 @@ import { DisponibiliteModule } from './disponibilite/disponibilite.module';
 import { ReclamationModule } from './reclamation/reclamation.module';
 import { StudentPreferenceModule } from './student_preference/student_preference.module';
 import { ChatModule } from './chat/chat.module';
+import { CallServerModule } from './call-server/call-server.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
     }),
+    CallServerModule,
     AuthModule,
     UserModule,
     DatabaseModule,

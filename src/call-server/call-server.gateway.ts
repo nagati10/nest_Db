@@ -12,6 +12,17 @@ interface UserData {
   userName?: string;
 }
 
+interface ActiveCall {
+  callId: string;
+  roomId: string;
+  fromUserId: string;
+  fromUserName: string;
+  toUserId: string;
+  isVideoCall: boolean;
+  status: 'ringing' | 'accepted' | 'rejected' | 'cancelled';
+  timestamp: Date;
+}
+
 @WebSocketGateway({
   cors: {
     origin: "*",
@@ -23,9 +34,10 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
   @WebSocketServer()
   server: Server;
 
-  private rooms = new Map<string, Map<string, UserData>>(); // roomId -> Map<socketId, userData>
-  private userSocketMap = new Map<string, string>(); // userId -> socketId
-  private socketUserMap = new Map<string, string>(); // socketId -> userId
+  private rooms = new Map<string, Map<string, UserData>>();
+  private userSocketMap = new Map<string, string>();
+  private socketUserMap = new Map<string, string>();
+  private activeCalls = new Map<string, ActiveCall>(); // callId -> ActiveCall
 
   handleConnection(client: Socket) {
     console.log('✅ Client connected:', client.id);
@@ -43,13 +55,15 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
       console.log(`🗑️ User ${userId} removed from mapping`);
     }
     
-    // Remove client from all rooms and notify others
+    // Cancel any active calls from this user
+    this.cancelUserCalls(userId || client.id);
+    
+    // Remove from rooms
     this.rooms.forEach((users, roomId) => {
       if (users && users.has(client.id)) {
         const userData = users.get(client.id);
         users.delete(client.id);
         
-        // Notify other users in the room
         client.to(roomId).emit('user-left', { 
           socketId: client.id,
           userId: userData?.userId 
@@ -63,8 +77,28 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
         }
       }
     });
+  }
 
-    console.log('📊 Total connected clients after disconnect:', this.server.engine.clientsCount - 1);
+  private cancelUserCalls(userIdentifier: string) {
+    this.activeCalls.forEach((call, callId) => {
+      if (call.fromUserId === userIdentifier || call.toUserId === userIdentifier) {
+        if (call.status === 'ringing') {
+          const targetSocketId = this.userSocketMap.get(
+            call.fromUserId === userIdentifier ? call.toUserId : call.fromUserId
+          );
+          
+          if (targetSocketId) {
+            this.server.to(targetSocketId).emit('call-ended', {
+              callId: call.callId,
+              reason: 'User disconnected'
+            });
+          }
+          
+          this.activeCalls.delete(callId);
+          console.log(`📞 Call ${callId} cancelled due to user disconnect`);
+        }
+      }
+    });
   }
 
   @SubscribeMessage('register')
@@ -82,6 +116,9 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
       if (existingSocketId && existingSocketId !== client.id) {
         console.log(`🔄 User ${userId} re-registered from new socket, removing old: ${existingSocketId}`);
         this.socketUserMap.delete(existingSocketId);
+        
+        // Cancel any active calls for the old socket
+        this.cancelUserCalls(userId);
       }
 
       // Register new mapping
@@ -89,7 +126,6 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
       this.socketUserMap.set(client.id, userId);
 
       console.log(`✅ User ${userId} registered with socket ${client.id}`);
-      console.log('📋 Current registered users:', Array.from(this.userSocketMap.keys()));
       
       client.emit('register-success', { userId });
     } catch (error) {
@@ -111,6 +147,19 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
         return;
       }
 
+      // Check if target user is already in a call
+      const existingCall = Array.from(this.activeCalls.values()).find(
+        call => (call.toUserId === toUserId || call.fromUserId === toUserId) && call.status === 'ringing'
+      );
+      
+      if (existingCall) {
+        console.log('❌ Target user is already in a call');
+        client.emit('call-request-failed', { 
+          reason: 'User is already in a call' 
+        });
+        return;
+      }
+
       console.log('🔔 CALL_REQUEST_RECEIVED:', {
         roomId,
         fromUserId,
@@ -120,35 +169,56 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
         clientId: client.id
       });
 
-      console.log('🔍 Looking for target user:', toUserId);
-      console.log('📋 Available users:', Array.from(this.userSocketMap.keys()));
-      
       // Check if the target user is connected and registered
       const targetSocketId = this.userSocketMap.get(toUserId);
       
       if (targetSocketId) {
         const callId = `call_${Date.now()}`;
-        console.log(`🎯 Sending incoming-call to socket: ${targetSocketId} for user: ${toUserId}`);
+        
+        // Create active call record
+        const activeCall: ActiveCall = {
+          callId,
+          roomId,
+          fromUserId,
+          fromUserName,
+          toUserId,
+          isVideoCall,
+          status: 'ringing',
+          timestamp: new Date()
+        };
+        
+        this.activeCalls.set(callId, activeCall);
+        
+        console.log(`🎯 Sending incoming-call to user: ${toUserId}`);
         
         const callData = {
+          callId,
           roomId,
           fromUserId,
           fromUserName,
           isVideoCall,
-          callId,
-          timestamp: new Date().toISOString()
+          timestamp: activeCall.timestamp.toISOString()
         };
 
         // Send call request to the target user
         client.to(targetSocketId).emit('incoming-call', callData);
         
-        client.emit('call-request-sent', { 
-          success: true, 
-          callId,
-          toUserId 
-        });
+        // Also send to caller for UI updates
+        client.emit('call-started', callData);
         
-        console.log('✅ Call request sent successfully to', toUserId);
+        console.log('✅ Call request sent successfully');
+        
+        // Set timeout to auto-reject after 30 seconds
+        setTimeout(() => {
+          const call = this.activeCalls.get(callId);
+          if (call && call.status === 'ringing') {
+            this.activeCalls.delete(callId);
+            client.emit('call-timeout', { callId });
+            client.to(targetSocketId).emit('call-timeout', { callId });
+            console.log(`⏰ Call ${callId} timed out`);
+          }
+        }, 30000);
+        
       } else {
         console.log('❌ Target user not found or offline:', toUserId);
         client.emit('call-request-failed', { 
@@ -167,71 +237,109 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
   @SubscribeMessage('call-response')
   handleCallResponse(client: Socket, data: any) {
     try {
-      const { roomId, toUserId, accepted, callId } = data;
+      const { callId, accepted } = data; // Removed roomId and toUserId from required fields
       
-      if (!roomId || !toUserId || !callId) {
-        console.log('❌ Call response failed: missing required fields');
+      if (!callId) {
+        console.log('❌ Call response failed: missing callId');
+        client.emit('call-response-failed', { reason: 'Missing callId' });
         return;
       }
 
-      console.log(`📞 Call response: ${accepted ? 'Accepted' : 'Rejected'} for call ${callId}`);
+      console.log('📞 Call response received:', { callId, accepted, clientId: client.id });
+
+      const call = this.activeCalls.get(callId);
+      if (!call) {
+        console.log('❌ Call not found:', callId);
+        client.emit('call-response-failed', { callId, reason: 'Call not found' });
+        return;
+      }
+
+      // Update call status
+      call.status = accepted ? 'accepted' : 'rejected';
       
-      // Find the target user's socket (the caller)
-      const targetSocketId = this.userSocketMap.get(toUserId);
+      // Find the caller's socket using the stored call information
+      const callerSocketId = this.userSocketMap.get(call.fromUserId);
       
-      if (targetSocketId) {
+      if (callerSocketId) {
         const fromUserId = this.socketUserMap.get(client.id);
         
-        client.to(targetSocketId).emit('call-response', {
-          accepted,
+        // Notify caller about the response
+        client.to(callerSocketId).emit('call-response', {
           callId,
-          fromUserId,
-          roomId
+          accepted,
+          fromUserId: fromUserId || 'unknown'
         });
 
-        console.log(`✅ Call response sent to ${toUserId}`);
+        console.log(`✅ Call response sent to caller: ${call.fromUserId}`);
         
         if (accepted) {
-          console.log(`🎉 Call accepted, joining room: ${roomId}`);
+          console.log(`🎉 Call accepted, notifying to join room: ${call.roomId}`);
+          
           // Notify both users to join the room
-          client.emit('join-call-room', { roomId });
-          client.to(targetSocketId).emit('join-call-room', { roomId });
+          client.emit('join-call-room', { 
+            roomId: call.roomId,
+            callId: call.callId
+          });
+          client.to(callerSocketId).emit('join-call-room', { 
+            roomId: call.roomId,
+            callId: call.callId
+          });
+          
+          // Remove from active calls after a short delay
+          setTimeout(() => {
+            this.activeCalls.delete(callId);
+          }, 5000);
+        } else {
+          // Remove rejected call immediately
+          this.activeCalls.delete(callId);
         }
       } else {
-        console.log('❌ Caller not found for response:', toUserId);
+        console.log('❌ Caller not found for response:', call.fromUserId);
         client.emit('call-response-failed', {
           callId,
           reason: 'Caller not available'
         });
+        this.activeCalls.delete(callId);
       }
     } catch (error) {
       console.error('❌ Call response error:', error);
+      client.emit('call-response-failed', { reason: 'Internal server error' });
     }
   }
 
   @SubscribeMessage('cancel-call')
   handleCancelCall(client: Socket, data: any) {
     try {
-      const { callId, toUserId } = data;
+      const { callId } = data; // Removed toUserId requirement
       
-      if (!callId || !toUserId) {
-        console.log('❌ Cancel call failed: missing callId or toUserId');
+      if (!callId) {
+        console.log('❌ Cancel call failed: missing callId');
         return;
       }
 
-      console.log(`❌ Call cancelled: ${callId} for user: ${toUserId}`);
+      const call = this.activeCalls.get(callId);
+      if (!call) {
+        console.log('❌ Call not found for cancellation:', callId);
+        return;
+      }
+
+      console.log(`❌ Call cancelled: ${callId}`);
       
-      const targetSocketId = this.userSocketMap.get(toUserId);
+      // Update call status
+      call.status = 'cancelled';
+      
+      const targetSocketId = this.userSocketMap.get(call.toUserId);
       
       if (targetSocketId) {
         client.to(targetSocketId).emit('call-cancelled', { 
           callId,
           reason: 'Call cancelled by caller'
         });
-        console.log('✅ Cancel notification sent to', toUserId);
-      } else {
-        console.log('❌ Target user not found for cancel:', toUserId);
+        console.log('✅ Cancel notification sent to', call.toUserId);
       }
+      
+      // Remove from active calls
+      this.activeCalls.delete(callId);
     } catch (error) {
       console.error('❌ Cancel call error:', error);
     }
@@ -260,7 +368,6 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
       
       const room = this.rooms.get(roomId);
       
-      // Check if room exists (it should after the set above)
       if (!room) {
         console.log('❌ Room not found after creation:', roomId);
         return;
@@ -340,14 +447,11 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
 
       console.log(`📤 Offer from ${client.id} in room ${roomId}`);
       
-      // Broadcast to all other users in the room
       client.to(roomId).emit('offer', {
         offer,
         fromSocketId: client.id,
         roomId
       });
-      
-      console.log(`✅ Offer broadcasted to room ${roomId}`);
     } catch (error) {
       console.error('❌ Offer error:', error);
     }
@@ -365,14 +469,11 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
 
       console.log(`📥 Answer from ${client.id} in room ${roomId}`);
       
-      // Broadcast to all other users in the room
       client.to(roomId).emit('answer', {
         answer,
         fromSocketId: client.id,
         roomId
       });
-      
-      console.log(`✅ Answer broadcasted to room ${roomId}`);
     } catch (error) {
       console.error('❌ Answer error:', error);
     }
@@ -390,14 +491,11 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
 
       console.log(`🧊 ICE candidate from ${client.id} in room ${roomId}`);
       
-      // Broadcast to all other users in the room
       client.to(roomId).emit('ice-candidate', {
         candidate,
         fromSocketId: client.id,
         roomId
       });
-      
-      console.log(`✅ ICE candidate broadcasted to room ${roomId}`);
     } catch (error) {
       console.error('❌ ICE candidate error:', error);
     }
@@ -434,35 +532,5 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
     }));
 
     client.emit('connected-users', { users: connectedUsers });
-  }
-
-  // Helper method to get room info (for debugging)
-  @SubscribeMessage('get-room-info')
-  handleGetRoomInfo(client: Socket, data: any) {
-    const { roomId } = data;
-    if (!roomId) {
-      return;
-    }
-
-    const room = this.rooms.get(roomId);
-    if (room) {
-      const participants = Array.from(room.entries()).map(([socketId, userData]) => ({
-        socketId,
-        userId: userData.userId,
-        userName: userData.userName
-      }));
-
-      client.emit('room-info', {
-        roomId,
-        participantCount: room.size,
-        participants
-      });
-    } else {
-      client.emit('room-info', {
-        roomId,
-        participantCount: 0,
-        participants: []
-      });
-    }
   }
 }

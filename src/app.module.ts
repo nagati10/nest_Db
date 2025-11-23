@@ -13,12 +13,14 @@ import { ReclamationModule } from './reclamation/reclamation.module';
 import { StudentPreferenceModule } from './student_preference/student_preference.module';
 import { ChatModule } from './chat/chat.module';
 import { CallServerModule } from './call-server/call-server.module';
+import { CvAiModule } from './cv_ai/cv_ai.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
     }),
+    CvAiModule,
     CallServerModule,
     AuthModule,
     UserModule,
@@ -30,6 +32,7 @@ import { CallServerModule } from './call-server/call-server.module';
     ReclamationModule,
     StudentPreferenceModule,
     ChatModule,
+    CvAiModule,
   ],
   controllers: [AppController],
   providers: [AppService],

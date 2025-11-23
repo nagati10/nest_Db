@@ -49,7 +49,7 @@ ${cvText}
     const prompt = this.buildPrompt(cvText);
 
     const resp = await this.openai.responses.create({
-      model: 'gpt-5-mini', // تنجم تبدلها gpt-4.1-mini إذا تحب أرخص
+      model: 'gpt-4o-mini',
       input: [
         { role: 'system', content: 'You output JSON only.' },
         { role: 'user', content: prompt },

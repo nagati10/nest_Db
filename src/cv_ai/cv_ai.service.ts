@@ -59,8 +59,6 @@ ${cvText}
       text: {
         format: { type: 'json_object' },
       },
-
-      temperature: 0.2,
     });
 
     // resp.output_text فيه JSON string

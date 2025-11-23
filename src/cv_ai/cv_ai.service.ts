@@ -1,67 +1,72 @@
-import { Injectable } from '@nestjs/common';
-import OpenAI from 'openai';
+import { Injectable } from "@nestjs/common";
+import fetch from "node-fetch";
 
 @Injectable()
 export class CvAiService {
-  private openai: OpenAI;
+  private readonly HF_URL =
+    "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3";
 
-  constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
-
-  private buildPrompt(cvText: string) {
-    return `
-You are an expert CV/Resume parser.
-
-Extract structured data from the CV text below.
-Return ONLY valid JSON matching this schema:
-
-{
-  "fullName": null,
-  "email": null,
-  "phone": null,
-  "location": null,
-  "headline": null,
-  "summary": null,
-  "skills": [],
-  "experiences": [
-    {"title": null, "company": null, "startDate": null, "endDate": null, "description": null}
-  ],
-  "education": [
-    {"degree": null, "school": null, "startDate": null, "endDate": null}
-  ]
-}
-
-Rules:
-- If info missing: keep null or empty array.
-- Don't add extra keys.
-- Experiences ordered newest -> oldest.
-- Skills are short strings.
-
-CV TEXT:
-${cvText}
-`;
+  private buildPrompt(cvText: string): string {
+    return [
+      "Extract CV information and return ONLY valid JSON:",
+      "",
+      "{",
+      '  "fullName": null,',
+      '  "email": null,',
+      '  "phone": null,',
+      '  "location": null,',
+      '  "headline": null,',
+      '  "summary": null,',
+      '  "skills": [],',
+      '  "experiences": [',
+      "    {",
+      '      "title": null,',
+      '      "company": null,',
+      '      "startDate": null,',
+      '      "endDate": null,',
+      '      "description": null',
+      "    }",
+      "  ],",
+      '  "education": []',
+      "}",
+      "",
+      "CV CONTENT:",
+      cvText
+    ].join("\n");
   }
 
   async analyze(cvText: string) {
     const prompt = this.buildPrompt(cvText);
 
-    const resp = await this.openai.responses.create({
-      model: 'gpt-4o-mini',
-      input: [
-        { role: 'system', content: 'You output JSON only.' },
-        { role: 'user', content: prompt },
-      ],
-
-      // ✅ FIX: Responses API الجديد
-      text: {
-        format: { type: 'json_object' },
+    const res = await fetch(this.HF_URL, {
+      method: "POST",
+      headers: {
+        // ✅ بلا backticks
+        Authorization: "Bearer " + (process.env.HF_TOKEN ?? ""),
+        "Content-Type": "application/json"
       },
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          max_new_tokens: 800
+        }
+      })
     });
 
-    // resp.output_text فيه JSON string
-    return JSON.parse(resp.output_text);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error("HF Error: " + err);
+    }
+
+    const data: any = await res.json();
+
+    const raw =
+      Array.isArray(data) ? data[0]?.generated_text : data.generated_text;
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { error: "Invalid JSON", raw };
+    }
   }
 }

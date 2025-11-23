@@ -501,20 +501,32 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
     }
   }
 
+    // Add to call-server.gateway.ts
   @SubscribeMessage('get-connection-status')
   handleGetConnectionStatus(client: Socket, data: any) {
-    try {
-      const { userId } = data;
-      const isOnline = userId ? this.userSocketMap.has(userId) : false;
-      
-      client.emit('connection-status', {
-        userId,
-        isOnline,
-        socketId: client.id
-      });
-    } catch (error) {
-      console.error('❌ Get connection status error:', error);
-    }
+      try {
+          const { userId } = data;
+          const isOnline = userId ? this.userSocketMap.has(userId) : false;
+          
+          client.emit('connection-status', {
+              userId,
+              isOnline,
+              socketId: client.id
+          });
+          
+          // Also notify if user comes online/offline
+          if (userId) {
+              const targetSocketId = this.userSocketMap.get(userId);
+              if (targetSocketId) {
+                  this.server.to(targetSocketId).emit('user-online-status', {
+                      userId: this.socketUserMap.get(client.id),
+                      isOnline: true
+                  });
+              }
+          }
+      } catch (error) {
+          console.error('❌ Get connection status error:', error);
+      }
   }
 
   // Helper method to get user ID by socket ID
@@ -533,4 +545,7 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
 
     client.emit('connected-users', { users: connectedUsers });
   }
+
+
+  
 }

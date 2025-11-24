@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 @Injectable()
 export class CvAiService {
   private readonly OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-  private readonly MODEL_ID = "google/gemini-2.0-flash-lite-preview";
+private readonly MODEL_ID = "nvidia/nemotron-nano-9b-v2:free";
 
   private buildPrompt(): string {
     return `

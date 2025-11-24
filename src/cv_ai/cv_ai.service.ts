@@ -3,13 +3,18 @@ import fetch from "node-fetch";
 
 @Injectable()
 export class CvAiService {
-  private readonly HF_URL =
-    "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3";
+
+  private readonly MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3";
+
+  // ✅ Router endpoint الجديد
+  private get HF_URL() {
+    return "https://router.huggingface.co/hf-inference/models/${this.MODEL_ID}/v1/chat/completions";
+  }
 
   private buildPrompt(cvText: string): string {
     return [
-      "Extract CV information and return ONLY valid JSON:",
-      "",
+      "You are an expert CV parser.",
+      "Return ONLY valid JSON with this schema:",
       "{",
       '  "fullName": null,',
       '  "email": null,',
@@ -41,16 +46,18 @@ export class CvAiService {
     const res = await fetch(this.HF_URL, {
       method: "POST",
       headers: {
-        // ✅ بلا backticks
         Authorization: "Bearer " + (process.env.HF_TOKEN ?? ""),
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: 800
-        }
-      })
+        model: this.MODEL_ID, // بعض providers تحبو موجود
+        messages: [
+          { role: "system", content: "You output JSON only." },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 900,
+        temperature: 0.2
+      }),
     });
 
     if (!res.ok) {
@@ -59,9 +66,7 @@ export class CvAiService {
     }
 
     const data: any = await res.json();
-
-    const raw =
-      Array.isArray(data) ? data[0]?.generated_text : data.generated_text;
+    const raw = data?.choices?.[0]?.message?.content ?? "{}";
 
     try {
       return JSON.parse(raw);

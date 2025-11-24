@@ -3,73 +3,66 @@ import fetch from "node-fetch";
 
 @Injectable()
 export class CvAiService {
-  private readonly MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3";
 
-  // ✅ provider-specific router endpoint
-  private readonly HF_URL =
-    "https://router.huggingface.co/hf-inference/v1/chat/completions";
+  private readonly API_URL = "https://openrouter.ai/api/v1/chat/completions";
+  private readonly MODEL_ID = "google/gemini-3-pro-image-preview";
 
-  private buildPrompt(cvText: string): string {
-    return [
-      "You are an expert CV parser.",
-      "Return ONLY valid JSON with this schema:",
-      "{",
-      '  "fullName": null,',
-      '  "email": null,',
-      '  "phone": null,',
-      '  "location": null,',
-      '  "headline": null,',
-      '  "summary": null,',
-      '  "skills": [],',
-      '  "experiences": [',
-      "    {",
-      '      "title": null,',
-      '      "company": null,',
-      '      "startDate": null,',
-      '      "endDate": null,',
-      '      "description": null',
-      "    }",
-      "  ],",
-      '  "education": []',
-      "}",
-      "",
-      "CV CONTENT:",
-      cvText
-    ].join("\n");
-  }
+  async analyzeImage(base64: string) {
 
-  async analyze(cvText: string) {
-    const prompt = this.buildPrompt(cvText);
+    if (!process.env.OPENROUTER_API_KEY) {
+      throw new Error("Missing OPENROUTER_API_KEY in environment variables");
+    }
 
-    const res = await fetch(this.HF_URL, {
+    // 👇 محتوى الرسالة المبعوث للموديل
+    const messages = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Extract all text from this CV image and return ONLY the raw extracted text."
+          },
+          {
+            type: "input_image",
+            image_url: `data:image/jpeg;base64,${base64}`
+          }
+        ]
+      }
+    ];
+
+    // 👇 إرسال الطلب
+    const response = await fetch(this.API_URL, {
       method: "POST",
       headers: {
-        "Authorization": "Bearer " + (process.env.HF_TOKEN ?? ""),
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model: this.MODEL_ID,
-        messages: [
-          { role: "system", content: "You output JSON only." },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 900,
-        temperature: 0.2
+        messages,
+        extra_body: {
+          modalities: ["image", "text"]
+        },
+        max_tokens: 800
       })
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error("HF Error: " + errText);
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error("OpenRouter Error: " + err);
     }
 
-    const data: any = await res.json();
-    const raw = data?.choices?.[0]?.message?.content ?? "{}";
+    // ⬇️ data any لتفادي مشكلة choices undefined
+    const data: any = await response.json();
 
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return { error: "Invalid JSON", raw };
+    const raw = data?.choices?.[0]?.message?.content ?? "";
+
+    if (!raw) {
+      return { error: "MODEL_RETURNED_EMPTY", data };
     }
+
+    return {
+      text: raw
+    };
   }
 }

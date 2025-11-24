@@ -3,66 +3,105 @@ import fetch from "node-fetch";
 
 @Injectable()
 export class CvAiService {
+  private readonly OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+  private readonly MODEL_ID = "google/gemini-2.0-flash-lite-preview";
 
-  private readonly API_URL = "https://openrouter.ai/api/v1/chat/completions";
-  private readonly MODEL_ID = "google/gemini-3-pro-image-preview";
+  private buildPrompt(): string {
+    return `
+You are an expert CV parser.
+Extract ALL information from this CV image.
+Return ONLY valid JSON with this schema (no extra text, no markdown):
+
+{
+  "fullName": null,
+  "email": null,
+  "phone": null,
+  "location": null,
+  "headline": null,
+  "summary": null,
+  "skills": [],
+  "experiences": [
+    {
+      "title": null,
+      "company": null,
+      "startDate": null,
+      "endDate": null,
+      "description": null
+    }
+  ],
+  "education": [
+    {
+      "degree": null,
+      "school": null,
+      "startDate": null,
+      "endDate": null
+    }
+  ]
+}
+
+Rules:
+- If info missing → keep null/empty.
+- Experiences newest → oldest.
+- Output JSON only.
+`.trim();
+  }
 
   async analyzeImage(base64: string) {
-
     if (!process.env.OPENROUTER_API_KEY) {
-      throw new Error("Missing OPENROUTER_API_KEY in environment variables");
+      throw new Error("Missing OPENROUTER_API_KEY");
     }
 
-    // 👇 محتوى الرسالة المبعوث للموديل
-    const messages = [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "Extract all text from this CV image and return ONLY the raw extracted text."
-          },
-          {
-            type: "input_image",
-            image_url: `data:image/jpeg;base64,${base64}`
-          }
-        ]
-      }
-    ];
+    const prompt = this.buildPrompt();
 
-    // 👇 إرسال الطلب
-    const response = await fetch(this.API_URL, {
+    const res = await fetch(this.OPENROUTER_URL, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        // optional but recommended by OpenRouter
+        "HTTP-Referer": "https://talleb-5edma.onrender.com",
+        "X-Title": "Taleb5edma CV AI",
       },
       body: JSON.stringify({
         model: this.MODEL_ID,
-        messages,
-        extra_body: {
-          modalities: ["image", "text"]
-        },
-        max_tokens: 800
-      })
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: `data:image/jpeg;base64,${base64}` }
+              },
+              {
+                type: "text",
+                text: prompt
+              }
+            ]
+          }
+        ],
+        max_tokens: 1200,
+        temperature: 0.2
+      }),
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error("OpenRouter Error: " + err);
+    const data: any = await res.json();
+
+    if (!res.ok) {
+      // OpenRouter errors يجيوا هنا
+      const errText = JSON.stringify(data);
+      throw new Error("OpenRouter Error: " + errText);
     }
 
-    // ⬇️ data any لتفادي مشكلة choices undefined
-    const data: any = await response.json();
+    // ✅ safe read (ما عادش TS error)
+    const raw =
+      data?.choices?.[0]?.message?.content ??
+      data?.choices?.[0]?.text ??
+      "{}";
 
-    const raw = data?.choices?.[0]?.message?.content ?? "";
-
-    if (!raw) {
-      return { error: "MODEL_RETURNED_EMPTY", data };
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { error: "Invalid JSON from model", raw };
     }
-
-    return {
-      text: raw
-    };
   }
 }

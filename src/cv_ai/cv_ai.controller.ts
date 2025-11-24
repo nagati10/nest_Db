@@ -6,9 +6,11 @@ import { AuthGuard } from "@nestjs/passport";
 export class CvAiController {
   constructor(private readonly cvAiService: CvAiService) {}
 
-  @UseGuards(AuthGuard("jwt"))
+  // POST /cv-ai/analyze-image
+  @UseGuards(AuthGuard("jwt"))  // نحّيه كان تحب endpoint public
   @Post("analyze-image")
   async analyzeImage(@Body("image") base64: string, @Req() req: any) {
+
     if (!base64 || base64.length < 50) {
       return { error: "Image base64 invalid" };
     }
@@ -17,7 +19,7 @@ export class CvAiController {
 
     return {
       userId: req.user?.sub,
-      profile,
+      profile
     };
   }
 }

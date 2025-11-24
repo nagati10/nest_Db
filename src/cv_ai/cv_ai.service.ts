@@ -5,8 +5,9 @@ import fetch from "node-fetch";
 export class CvAiService {
   private readonly MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3";
 
-  // HF Router (OpenAI compatible)
-  private readonly HF_URL = "https://router.huggingface.co/v1/chat/completions";
+  // ✅ provider-specific router endpoint
+  private readonly HF_URL =
+    "https://router.huggingface.co/hf-inference/v1/chat/completions";
 
   private buildPrompt(cvText: string): string {
     return [

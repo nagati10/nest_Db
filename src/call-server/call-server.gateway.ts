@@ -546,6 +546,101 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
     client.emit('connected-users', { users: connectedUsers });
   }
 
+@SubscribeMessage('media-frame')
+handleMediaFrame(client: Socket, data: any) {
+    try {
+        const { roomId, type, frameData, audioData, userId, userName, timestamp } = data;
+        
+        if (!roomId) {
+            console.log('❌ Media frame failed: missing roomId');
+            return;
+        }
 
+        // Log media frame reception for debugging
+        console.log(`📡 Media frame received - Type: ${type}, Room: ${roomId}, From: ${userId}, Size: ${audioData?.length || frameData?.length || 0} bytes`);
+
+        // Broadcast to other users in the same room
+        client.to(roomId).emit('media-frame', {
+            roomId,
+            type,
+            frameData,
+            audioData,
+            userId,
+            userName,
+            timestamp,
+            fromSocketId: client.id
+        });
+
+        // Log successful broadcast
+        console.log(`📤 Media frame broadcast to room ${roomId} - Type: ${type}`);
+
+    } catch (error) {
+        console.error('❌ Media frame error:', error);
+    }
+}
+
+
+@SubscribeMessage('call-message')
+handleCallMessage(client: Socket, data: any) {
+    try {
+        const { roomId, message, userId, userName } = data;
+        
+        if (!roomId || !message) {
+            console.log('❌ Call message failed: missing roomId or message');
+            return;
+        }
+
+        console.log(`💬 Call message in room ${roomId} from ${userName}: ${message}`);
+        
+        // Broadcast to other users in the room
+        client.to(roomId).emit('call-message', {
+            roomId,
+            message,
+            userId,
+            userName,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ Call message error:', error);
+    }
+}
+
+
+@SubscribeMessage('debug-media-streaming')
+handleDebugMediaStreaming(client: Socket, data: any) {
+    try {
+        const { roomId, userId, action } = data;
+        
+        console.log('🔍 Media Streaming Debug Info:');
+        console.log(`- Room: ${roomId}`);
+        console.log(`- User: ${userId}`);
+        console.log(`- Action: ${action}`);
+        console.log(`- Total Rooms: ${this.rooms.size}`);
+        console.log(`- Total Connected Users: ${this.userSocketMap.size}`);
+        
+        if (roomId) {
+            const room = this.rooms.get(roomId);
+            if (room) {
+                console.log(`- Room ${roomId} Participants: ${room.size}`);
+                room.forEach((userData, socketId) => {
+                    console.log(`  - ${userData.userId} (${socketId})`);
+                });
+            } else {
+                console.log(`- Room ${roomId} not found`);
+            }
+        }
+
+        // Send debug info back to client
+        client.emit('debug-media-info', {
+            roomCount: this.rooms.size,
+            userCount: this.userSocketMap.size,
+            roomParticipants: roomId ? Array.from(this.rooms.get(roomId)?.entries() || []) : []
+        });
+
+    } catch (error) {
+        console.error('❌ Debug media streaming error:', error);
+    }
+}
   
 }

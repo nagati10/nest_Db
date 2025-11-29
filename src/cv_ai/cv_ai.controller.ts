@@ -21,7 +21,15 @@ import {
   ExtractEntitiesResponseDto,
   HealthCheckResponseDto,
 } from './cv_ai.dto';
+
+
+
+// ✅ SOLUTION 1 : Utiliser require (Recommandé pour pdf-parse)
 const pdfParse = require('pdf-parse');
+
+// ✅ SOLUTION 2 : Import dynamique
+//import pdfParse = require('pdf-parse');
+
 
 @ApiTags('CV AI - Analyse de CV')
 @Controller('cv-ai')
@@ -112,8 +120,10 @@ export class CvAiController {
         file: {
           type: 'string',
           format: 'binary',
+          description: 'Fichier PDF du CV (max 5 MB)',
         },
       },
+      required: ['file'],
     },
   })
   @ApiResponse({ 
@@ -134,10 +144,10 @@ export class CvAiController {
       throw new BadRequestException('Le fichier PDF est requis');
     }
 
-    this.logger.log(`📄 Traitement du fichier: ${file.originalname} (${file.size} bytes)`);
+    this.logger.log(`📄 Traitement du fichier: ${file.originalname} (${(file.size / 1024).toFixed(2)} KB)`);
 
     try {
-      // Extraire le texte du PDF
+      // Extraire le texte du PDF avec pdf-parse
       const pdfData = await pdfParse(file.buffer);
       const text = pdfData.text;
 
@@ -148,6 +158,15 @@ export class CvAiController {
       }
 
       this.logger.log(`✅ Texte extrait du PDF: ${text.length} caractères`);
+
+      // Vérifier la longueur du texte
+      if (text.length > 15000) {
+        this.logger.warn(`⚠️  Texte très long (${text.length} caractères), troncature à 15000`);
+        const truncatedText = text.substring(0, 15000);
+        const result = await this.cvAiService.parseCv(truncatedText);
+        this.logger.log('✅ Parsing du PDF réussi (texte tronqué)');
+        return result;
+      }
 
       // Parser le texte extrait
       const result = await this.cvAiService.parseCv(text);
@@ -223,7 +242,7 @@ export class CvAiController {
     description: 'Service opérationnel',
     type: HealthCheckResponseDto 
   })
-  async healthCheck(): Promise<HealthCheckResponseDto> {
+  healthCheck(): HealthCheckResponseDto {
     this.logger.log('💚 Health check demandé');
     
     return {
@@ -247,11 +266,14 @@ export class CvAiController {
     status: 200, 
     description: 'Informations du service' 
   })
-  async getInfo() {
+  getInfo() {
+    this.logger.log('ℹ️  Info demandée');
+    
     return {
       model: 'yashpwr/resume-ner-bert-v2',
       version: 'v2',
       accuracy: '90.87% F1 Score',
+      supportedLanguages: ['English'],
       entities: [
         'Name',
         'Email Address',
@@ -271,13 +293,16 @@ export class CvAiController {
         timeout: '30 seconds',
       },
       endpoints: [
-        'POST /cv-ai/parse-text',
-        'POST /cv-ai/parse-pdf',
-        'POST /cv-ai/extract-entities',
-        'GET /cv-ai/health',
-        'GET /cv-ai/info',
+        { method: 'POST', path: '/cv-ai/parse-text', description: 'Analyser un CV depuis du texte brut' },
+        { method: 'POST', path: '/cv-ai/parse-pdf', description: 'Analyser un CV depuis un PDF' },
+        { method: 'POST', path: '/cv-ai/extract-entities', description: 'Extraire uniquement les entités NER' },
+        { method: 'GET', path: '/cv-ai/health', description: 'Vérifier le statut du service' },
+        { method: 'GET', path: '/cv-ai/info', description: 'Informations sur le service' },
       ],
       documentation: 'https://huggingface.co/yashpwr/resume-ner-bert-v2',
+      examples: {
+        text: 'John Doe is a Senior Software Engineer with 5 years of experience at Google. Skills: Python, JavaScript, React. Email: john@example.com Phone: +1-555-123-4567',
+      },
     };
   }
 }

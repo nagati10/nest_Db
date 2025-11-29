@@ -32,7 +32,6 @@ import { CvAiModule } from './cv_ai/cv_ai.module';
     ReclamationModule,
     StudentPreferenceModule,
     ChatModule,
-    CvAiModule,
   ],
   controllers: [AppController],
   providers: [AppService],

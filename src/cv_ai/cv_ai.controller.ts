@@ -22,15 +22,6 @@ import {
   HealthCheckResponseDto,
 } from './cv_ai.dto';
 
-
-
-// ✅ SOLUTION 1 : Utiliser require (Recommandé pour pdf-parse)
-const pdfParse = require('pdf-parse');
-
-// ✅ SOLUTION 2 : Import dynamique
-//import pdfParse = require('pdf-parse');
-
-
 @ApiTags('CV AI - Analyse de CV')
 @Controller('cv-ai')
 export class CvAiController {
@@ -147,7 +138,19 @@ export class CvAiController {
     this.logger.log(`📄 Traitement du fichier: ${file.originalname} (${(file.size / 1024).toFixed(2)} KB)`);
 
     try {
-      // Extraire le texte du PDF avec pdf-parse
+      // Import dynamique de pdf-parse pour éviter les problèmes de compatibilité
+      const pdfParseModule = await import('pdf-parse');
+      const pdfParse = (pdfParseModule as any).default ?? (pdfParseModule as any);
+
+      this.logger.log('📦 Module pdf-parse chargé avec succès');
+
+      // Vérifier que pdfParse est bien une fonction
+      if (typeof pdfParse !== 'function') {
+        this.logger.error('❌ pdf-parse n\'est pas une fonction');
+        throw new Error('Module pdf-parse mal configuré');
+      }
+
+      // Extraire le texte du PDF
       const pdfData = await pdfParse(file.buffer);
       const text = pdfData.text;
 
@@ -178,6 +181,7 @@ export class CvAiController {
         throw error;
       }
       this.logger.error(`❌ Erreur lors de la lecture du PDF: ${error.message}`);
+      this.logger.error(`Stack: ${error.stack}`);
       throw new BadRequestException(
         `Erreur lors de la lecture du PDF: ${error.message}`,
       );

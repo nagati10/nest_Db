@@ -21,7 +21,7 @@ interface ActiveCall {
   isVideoCall: boolean;
   status: 'ringing' | 'accepted' | 'rejected' | 'cancelled' | 'ended';
   timestamp: Date;
-  participants: Set<string>; // Track participants in the call
+  participants: Set<string>;
 }
 
 @WebSocketGateway({
@@ -57,7 +57,9 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
     }
     
     // Handle user leaving calls
-    this.handleUserLeftCalls(client.id, userId || 'unknown');
+    if (userId) {
+      this.handleUserLeftCalls(client.id, userId);
+    }
     
     // Remove from rooms
     this.rooms.forEach((users, roomId) => {
@@ -72,6 +74,9 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
         
         console.log(`🚪 User left room ${roomId}, remaining: ${users.size}`);
         
+        // Check if this room is associated with an active call and end it
+        this.checkAndEndCallForRoom(roomId, userId || 'unknown');
+        
         if (users.size === 0) {
           this.rooms.delete(roomId);
           console.log(`🏁 Room ${roomId} deleted (empty)`);
@@ -81,16 +86,60 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
   }
 
   /**
-   * Handle when a user leaves calls - only end call if one of the two participants leaves
+   * Check if a room is associated with an active call and end it if a participant left
+   */
+  private checkAndEndCallForRoom(roomId: string, leavingUserId: string) {
+    console.log(`🔍 Checking calls for room ${roomId}, user ${leavingUserId} left`);
+    
+    this.activeCalls.forEach((call, callId) => {
+      if (call.roomId === roomId) {
+        console.log(`📞 Found active call ${callId} for room ${roomId}`);
+        
+        // Check if the leaving user is one of the two participants
+        const isParticipant = call.fromUserId === leavingUserId || call.toUserId === leavingUserId;
+        
+        if (isParticipant && (call.status === 'accepted' || call.status === 'ringing')) {
+          console.log(`🔚 Participant ${leavingUserId} left active call ${callId}, ending call...`);
+          
+          // Find the other participant
+          const otherUserId = call.fromUserId === leavingUserId ? call.toUserId : call.fromUserId;
+          const otherSocketId = this.userSocketMap.get(otherUserId);
+          
+          if (otherSocketId) {
+            // Notify the other participant that the call ended
+            this.server.to(otherSocketId).emit('call-ended', {
+              callId: call.callId,
+              roomId: call.roomId,
+              reason: 'Other participant left the call'
+            });
+            console.log(`✅ Notified other participant ${otherUserId} about call end`);
+          }
+          
+          // Clean up the room
+          this.cleanupRoom(call.roomId);
+          
+          // Remove from active calls
+          this.activeCalls.delete(callId);
+          console.log(`🗑️ Call ${callId} removed from active calls`);
+        }
+      }
+    });
+  }
+
+  /**
+   * Handle when a user leaves calls
    */
   private handleUserLeftCalls(socketId: string, userId: string) {
     console.log(`🔚 User ${userId} left, checking active calls...`);
     
-    this.activeCalls.forEach((call, callId) => {
+    // Create a copy of activeCalls to avoid modification during iteration
+    const callsToCheck = Array.from(this.activeCalls.entries());
+    
+    for (const [callId, call] of callsToCheck) {
       // Check if this user is one of the two participants in this call
       const isParticipant = call.fromUserId === userId || call.toUserId === userId;
       
-      if (isParticipant && call.status === 'accepted') {
+      if (isParticipant && (call.status === 'accepted' || call.status === 'ringing')) {
         console.log(`📞 User ${userId} was in active call ${callId}, ending call...`);
         
         // Find the other participant
@@ -114,7 +163,7 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
         this.activeCalls.delete(callId);
         console.log(`🗑️ Call ${callId} removed from active calls`);
       }
-    });
+    }
   }
 
   /**
@@ -227,7 +276,7 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
           isVideoCall,
           status: 'ringing',
           timestamp: new Date(),
-          participants: new Set([fromUserId, toUserId]) // Track the two participants
+          participants: new Set([fromUserId, toUserId])
         };
         
         this.activeCalls.set(callId, activeCall);
@@ -509,6 +558,7 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
       const room = this.rooms.get(roomId);
       if (room && room.has(client.id)) {
         const userData = room.get(client.id);
+        const userId = userData?.userId;
         room.delete(client.id);
         
         client.leave(roomId);
@@ -516,10 +566,15 @@ export class CallServerGateway implements OnGatewayConnection, OnGatewayDisconne
         // Notify others
         client.to(roomId).emit('user-left', {
           socketId: client.id,
-          userId: userData?.userId
+          userId: userId
         });
         
         console.log(`🚪 User left call room: ${roomId}, remaining: ${room.size}`);
+        
+        // Check if this room is associated with an active call and end it
+        if (userId) {
+          this.checkAndEndCallForRoom(roomId, userId);
+        }
         
         if (room.size === 0) {
           this.rooms.delete(roomId);

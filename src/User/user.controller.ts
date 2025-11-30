@@ -40,11 +40,11 @@ export class UserController {
     
     return {
       imageUrl: `./uploads/${user.image}`,
-      filename: user.image
+      filename: user.image,
+      username:user.nom
     };
   }
 
-  // New endpoint to get other users' profile images by ID
   @Get('image/:userId')
   @ApiOperation({ summary: 'Get user profile image URL by user ID' })
   @ApiResponse({ status: 200, description: 'Returns image URL' })
@@ -58,7 +58,8 @@ export class UserController {
     
     return {
       imageUrl: `./uploads/${user.image}`,
-      filename: user.image
+      filename: user.image,
+      username:user.nom
     };
   }
 

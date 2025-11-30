@@ -39,7 +39,7 @@ export class UserController {
     }
     
     return {
-      imageUrl: `./uploads/${user.image}`,
+      imageUrl: `uploads/${user.image}`,
       filename: user.image,
       username:user.nom
     };
@@ -57,7 +57,7 @@ export class UserController {
     }
     
     return {
-      imageUrl: `./uploads/${user.image}`,
+      imageUrl: `uploads/${user.image}`,
       filename: user.image,
       username:user.nom
     };

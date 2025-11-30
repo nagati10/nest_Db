@@ -60,8 +60,27 @@ export class UserController {
     }
 
     return {
-      imageUrl: `http://localhost:3005/${user.image}`,
+      imageUrl: `uploads/${user.image}`,
       filename: user.image,
+      username:user.nom
+    };
+  }
+
+  @Get('image/:userId')
+  @ApiOperation({ summary: 'Get user profile image URL by user ID' })
+  @ApiResponse({ status: 200, description: 'Returns image URL' })
+  @ApiResponse({ status: 404, description: 'User not found or has no profile image' })
+  async getImageById(@Param('userId') userId: string) {
+    const user = await this.userService.findOne(userId);
+    
+    if (!user.image) {
+      throw new NotFoundException('User has no profile image');
+    }
+    
+    return {
+      imageUrl: `uploads/${user.image}`,
+      filename: user.image,
+      username:user.nom
     };
   }
 
@@ -248,9 +267,9 @@ export class UserController {
   async getLikedOffres(@CurrentUser() user: any) {
     const id = user.userId || user._id || user.id;
     const likedOffres = await this.userService.getLikedOffres(id);
-
+    
     return {
-      likedOffres: likedOffres.map((id) => id.toString()),
+      likedOffres: likedOffres.map(id => id.toString())
     };
   }
 
@@ -262,7 +281,7 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   async addLikedOffre(
     @CurrentUser() user: any,
-    @Param('offreId') offreId: string,
+    @Param('offreId') offreId: string
   ) {
     const id = user.userId || user._id || user.id;
     return this.userService.addLikedOffre(id, offreId);
@@ -276,7 +295,7 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   async removeLikedOffre(
     @CurrentUser() user: any,
-    @Param('offreId') offreId: string,
+    @Param('offreId') offreId: string
   ) {
     const id = user.userId || user._id || user.id;
     return this.userService.removeLikedOffre(id, offreId);

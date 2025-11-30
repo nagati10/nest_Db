@@ -7,10 +7,10 @@ import { AdminController } from './admin.controller';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }])
+    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
   ],
-  controllers: [AdminController,UserController],
+  controllers: [AdminController, UserController],
   providers: [UserService],
-  exports: [UserService]
+  exports: [UserService],
 })
 export class UserModule {}

@@ -1,16 +1,37 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpException, HttpStatus, UseGuards, UseInterceptors, UploadedFile, BadRequestException, NotFoundException, HttpCode } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  HttpException,
+  HttpStatus,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  NotFoundException,
+  HttpCode,
+} from '@nestjs/common';
 import { UserService } from './user.service';
-import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import path from 'path';
 import type { UserDocument } from './schemas/user.schema';
-import * as fs from 'fs';
 import { ResetPasswordDto } from './dto/reset-password-dto';
+import { CreateProfileFromCvDto } from './dto/create-profile-from-cv.dto';
 
 @Controller('user/me')
 export class UserController {
@@ -37,10 +58,10 @@ export class UserController {
     if (!user.image) {
       throw new NotFoundException('User has no profile image');
     }
-    
+
     return {
       imageUrl: `http://localhost:3005/${user.image}`,
-      filename: user.image
+      filename: user.image,
     };
   }
 
@@ -51,7 +72,7 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'update your profile' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
-  update(@CurrentUser() user: any ,@Body() updateUserDto: UpdateUserDto) {
+  update(@CurrentUser() user: any, @Body() updateUserDto: UpdateUserDto) {
     const id = user.userId || user._id || user.id;
     return this.userService.update(id, updateUserDto);
   }
@@ -62,7 +83,7 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'delete your profile' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
-  remove(@CurrentUser() user: any ) {
+  remove(@CurrentUser() user: any) {
     const id = user.userId || user._id || user.id;
     return this.userService.remove(id);
   }
@@ -84,19 +105,25 @@ export class UserController {
     },
   })
   @ApiResponse({ status: 200, description: 'Image updated successfully' })
-  @ApiResponse({ status: 400, description: 'No image provided or invalid image' })
+  @ApiResponse({
+    status: 400,
+    description: 'No image provided or invalid image',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('image', {
-    storage: diskStorage({
-      destination: './uploads',
-      filename: (req, file, cb) => {
-        // Generate unique filename - same logic as register
-        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-        cb(null, uniqueName);
-      }
-    })
-  }))
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: diskStorage({
+        destination: './uploads',
+        filename: (req, file, cb) => {
+          const uniqueName = `${Date.now()}-${Math.round(
+            Math.random() * 1e9,
+          )}${path.extname(file.originalname)}`;
+          cb(null, uniqueName);
+        },
+      }),
+    }),
+  )
   async updateImage(
     @CurrentUser() user: UserDocument,
     @UploadedFile() image?: Express.Multer.File,
@@ -105,15 +132,17 @@ export class UserController {
       if (!image) {
         throw new BadRequestException('No image provided');
       }
-      
+
       const imagePath = `uploads/${image.filename}`;
       return await this.userService.updateImage(user._id.toString(), imagePath);
-      
-    } catch (error) {
+    } catch (error: any) {
       if (error.name === 'ValidationError' || error.name === 'CastError') {
         throw new HttpException('Invalid input', HttpStatus.BAD_REQUEST);
       }
-      throw new HttpException('Problem au niveau serveur', HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException(
+        'Problem au niveau serveur',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 
@@ -136,9 +165,9 @@ export class UserController {
   async getModeExamens(@CurrentUser() user: any) {
     const id = user.userId || user._id || user.id;
     const currentUser = await this.userService.findOne(id);
-    
+
     return {
-      modeExamens: currentUser.modeExamens
+      modeExamens: currentUser.modeExamens,
     };
   }
 
@@ -146,7 +175,10 @@ export class UserController {
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Toggle archive state for current user' })
-  @ApiResponse({ status: 200, description: 'Archive state toggled successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Archive state toggled successfully',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
   async switchArchiveState(@CurrentUser() user: any) {
@@ -170,7 +202,10 @@ export class UserController {
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Decrease trust XP' })
-  @ApiResponse({ status: 200, description: 'Trust XP decreased successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Trust XP decreased successfully',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
   async levelDown(@CurrentUser() user: any, @Param('xp') xp: number) {
@@ -193,7 +228,10 @@ export class UserController {
   @ApiBearerAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Toggle organization status' })
-  @ApiResponse({ status: 200, description: 'Organization status toggled successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Organization status toggled successfully',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @UseGuards(JwtAuthGuard)
   async toggleOrganization(@CurrentUser() user: any) {
@@ -201,70 +239,89 @@ export class UserController {
     return this.userService.toggleOrganization(id);
   }
 
-
   @Get('liked-offres')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Get current user liked offers' })
-@ApiResponse({ status: 200, description: 'Returns array of liked offer IDs' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-async getLikedOffres(@CurrentUser() user: any) {
-  const id = user.userId || user._id || user.id;
-  const likedOffres = await this.userService.getLikedOffres(id);
-  
-  return {
-    likedOffres: likedOffres.map(id => id.toString())
-  };
-}
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user liked offers' })
+  @ApiResponse({ status: 200, description: 'Returns array of liked offer IDs' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async getLikedOffres(@CurrentUser() user: any) {
+    const id = user.userId || user._id || user.id;
+    const likedOffres = await this.userService.getLikedOffres(id);
 
-@Post('like-offre/:offreId')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Add offer to liked list' })
-@ApiResponse({ status: 200, description: 'Offer added to liked list' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-async addLikedOffre(
-  @CurrentUser() user: any,
-  @Param('offreId') offreId: string
-) {
-  const id = user.userId || user._id || user.id;
-  return this.userService.addLikedOffre(id, offreId);
-}
-
-@Delete('unlike-offre/:offreId')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Remove offer from liked list' })
-@ApiResponse({ status: 200, description: 'Offer removed from liked list' })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-async removeLikedOffre(
-  @CurrentUser() user: any,
-  @Param('offreId') offreId: string
-) {
-  const id = user.userId || user._id || user.id;
-  return this.userService.removeLikedOffre(id, offreId);
-}
-
-@Get('is-offre-liked/:offreId')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Check if offer is liked by current user' })
-@ApiResponse({ status: 200, description: 'Returns like status', schema: {
-  properties: {
-    isLiked: { type: 'boolean', example: true }
+    return {
+      likedOffres: likedOffres.map((id) => id.toString()),
+    };
   }
-}})
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@UseGuards(JwtAuthGuard)
-async isOffreLiked(
-  @CurrentUser() user: any,
-  @Param('offreId') offreId: string
-) {
-  const id = user.userId || user._id || user.id;
-  const isLiked = await this.userService.isOffreLiked(id, offreId);
-  
-  return { isLiked };
-}
 
+  @Post('like-offre/:offreId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Add offer to liked list' })
+  @ApiResponse({ status: 200, description: 'Offer added to liked list' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async addLikedOffre(
+    @CurrentUser() user: any,
+    @Param('offreId') offreId: string,
+  ) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.addLikedOffre(id, offreId);
+  }
+
+  @Delete('unlike-offre/:offreId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Remove offer from liked list' })
+  @ApiResponse({ status: 200, description: 'Offer removed from liked list' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async removeLikedOffre(
+    @CurrentUser() user: any,
+    @Param('offreId') offreId: string,
+  ) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.removeLikedOffre(id, offreId);
+  }
+
+  @Get('is-offre-liked/:offreId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Check if offer is liked by current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns like status',
+    schema: {
+      properties: {
+        isLiked: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async isOffreLiked(
+    @CurrentUser() user: any,
+    @Param('offreId') offreId: string,
+  ) {
+    const id = user.userId || user._id || user.id;
+    const isLiked = await this.userService.isOffreLiked(id, offreId);
+
+    return { isLiked };
+  }
+
+  // --------- PROFIL À PARTIR DU CV IA ----------
+  @Patch('cv/profile')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create or update profile fields from AI CV analysis',
+  })
+  @ApiResponse({ status: 200, description: 'Profile updated from CV' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseGuards(JwtAuthGuard)
+  async createOrUpdateProfileFromCv(
+    @CurrentUser() user: any,
+    @Body() body: CreateProfileFromCvDto,
+  ) {
+    const id = user.userId || user._id || user.id;
+    return this.userService.createOrUpdateProfileFromCv(id, body);
+  }
 
   @Get(':id/trust/level')
   @ApiBearerAuth()
@@ -276,5 +333,4 @@ async isOffreLiked(
   async getTrustLevel2(@Param('id') id: string) {
     return this.userService.getTrustLevel(id);
   }
-
 }

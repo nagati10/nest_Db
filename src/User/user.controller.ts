@@ -39,15 +39,13 @@ export class UserController {
     }
     
     return {
-      imageUrl: `http://localhost:3005/${user.image}`,
+      imageUrl: `./uploads/${user.image}`,
       filename: user.image
     };
   }
 
   // New endpoint to get other users' profile images by ID
   @Get('image/:userId')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get user profile image URL by user ID' })
   @ApiResponse({ status: 200, description: 'Returns image URL' })
   @ApiResponse({ status: 404, description: 'User not found or has no profile image' })
@@ -59,7 +57,7 @@ export class UserController {
     }
     
     return {
-      imageUrl: `http://localhost:3005/${user.image}`,
+      imageUrl: `./uploads/${user.image}`,
       filename: user.image
     };
   }

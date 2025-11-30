@@ -39,27 +39,8 @@ export class UserController {
     }
     
     return {
-      imageUrl: `./uploads/${user.image}`,
-      filename: user.image,
-      username:user.nom
-    };
-  }
-
-  @Get('image/:userId')
-  @ApiOperation({ summary: 'Get user profile image URL by user ID' })
-  @ApiResponse({ status: 200, description: 'Returns image URL' })
-  @ApiResponse({ status: 404, description: 'User not found or has no profile image' })
-  async getImageById(@Param('userId') userId: string) {
-    const user = await this.userService.findOne(userId);
-    
-    if (!user.image) {
-      throw new NotFoundException('User has no profile image');
-    }
-    
-    return {
-      imageUrl: `./uploads/${user.image}`,
-      filename: user.image,
-      username:user.nom
+      imageUrl: `uploads/${user.image}`,
+      filename: user.image
     };
   }
 
@@ -220,68 +201,70 @@ export class UserController {
     return this.userService.toggleOrganization(id);
   }
 
+
   @Get('liked-offres')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get current user liked offers' })
-  @ApiResponse({ status: 200, description: 'Returns array of liked offer IDs' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @UseGuards(JwtAuthGuard)
-  async getLikedOffres(@CurrentUser() user: any) {
-    const id = user.userId || user._id || user.id;
-    const likedOffres = await this.userService.getLikedOffres(id);
-    
-    return {
-      likedOffres: likedOffres.map(id => id.toString())
-    };
-  }
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Get current user liked offers' })
+@ApiResponse({ status: 200, description: 'Returns array of liked offer IDs' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async getLikedOffres(@CurrentUser() user: any) {
+  const id = user.userId || user._id || user.id;
+  const likedOffres = await this.userService.getLikedOffres(id);
+  
+  return {
+    likedOffres: likedOffres.map(id => id.toString())
+  };
+}
 
-  @Post('like-offre/:offreId')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Add offer to liked list' })
-  @ApiResponse({ status: 200, description: 'Offer added to liked list' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @UseGuards(JwtAuthGuard)
-  async addLikedOffre(
-    @CurrentUser() user: any,
-    @Param('offreId') offreId: string
-  ) {
-    const id = user.userId || user._id || user.id;
-    return this.userService.addLikedOffre(id, offreId);
-  }
+@Post('like-offre/:offreId')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Add offer to liked list' })
+@ApiResponse({ status: 200, description: 'Offer added to liked list' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async addLikedOffre(
+  @CurrentUser() user: any,
+  @Param('offreId') offreId: string
+) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.addLikedOffre(id, offreId);
+}
 
-  @Delete('unlike-offre/:offreId')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Remove offer from liked list' })
-  @ApiResponse({ status: 200, description: 'Offer removed from liked list' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @UseGuards(JwtAuthGuard)
-  async removeLikedOffre(
-    @CurrentUser() user: any,
-    @Param('offreId') offreId: string
-  ) {
-    const id = user.userId || user._id || user.id;
-    return this.userService.removeLikedOffre(id, offreId);
-  }
+@Delete('unlike-offre/:offreId')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Remove offer from liked list' })
+@ApiResponse({ status: 200, description: 'Offer removed from liked list' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async removeLikedOffre(
+  @CurrentUser() user: any,
+  @Param('offreId') offreId: string
+) {
+  const id = user.userId || user._id || user.id;
+  return this.userService.removeLikedOffre(id, offreId);
+}
 
-  @Get('is-offre-liked/:offreId')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Check if offer is liked by current user' })
-  @ApiResponse({ status: 200, description: 'Returns like status', schema: {
-    properties: {
-      isLiked: { type: 'boolean', example: true }
-    }
-  }})
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @UseGuards(JwtAuthGuard)
-  async isOffreLiked(
-    @CurrentUser() user: any,
-    @Param('offreId') offreId: string
-  ) {
-    const id = user.userId || user._id || user.id;
-    const isLiked = await this.userService.isOffreLiked(id, offreId);
-    
-    return { isLiked };
+@Get('is-offre-liked/:offreId')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Check if offer is liked by current user' })
+@ApiResponse({ status: 200, description: 'Returns like status', schema: {
+  properties: {
+    isLiked: { type: 'boolean', example: true }
   }
+}})
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@UseGuards(JwtAuthGuard)
+async isOffreLiked(
+  @CurrentUser() user: any,
+  @Param('offreId') offreId: string
+) {
+  const id = user.userId || user._id || user.id;
+  const isLiked = await this.userService.isOffreLiked(id, offreId);
+  
+  return { isLiked };
+}
+
 
   @Get(':id/trust/level')
   @ApiBearerAuth()
@@ -293,4 +276,5 @@ export class UserController {
   async getTrustLevel2(@Param('id') id: string) {
     return this.userService.getTrustLevel(id);
   }
+
 }

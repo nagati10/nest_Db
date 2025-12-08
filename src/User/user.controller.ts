@@ -35,7 +35,7 @@ import { CreateProfileFromCvDto } from './dto/create-profile-from-cv.dto';
 
 @Controller('user/me')
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(private readonly userService: UserService) { }
 
   @Get()
   @ApiBearerAuth()
@@ -62,7 +62,7 @@ export class UserController {
     return {
       imageUrl: `uploads/${user.image}`,
       filename: user.image,
-      username:user.nom
+      username: user.nom
     };
   }
 
@@ -72,15 +72,15 @@ export class UserController {
   @ApiResponse({ status: 404, description: 'User not found or has no profile image' })
   async getImageById(@Param('userId') userId: string) {
     const user = await this.userService.findOne(userId);
-    
+
     if (!user.image) {
       throw new NotFoundException('User has no profile image');
     }
-    
+
     return {
       imageUrl: `uploads/${user.image}`,
       filename: user.image,
-      username:user.nom
+      username: user.nom
     };
   }
 
@@ -267,7 +267,7 @@ export class UserController {
   async getLikedOffres(@CurrentUser() user: any) {
     const id = user.userId || user._id || user.id;
     const likedOffres = await this.userService.getLikedOffres(id);
-    
+
     return {
       likedOffres: likedOffres.map(id => id.toString())
     };
@@ -329,10 +329,93 @@ export class UserController {
   @Patch('cv/profile')
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Create or update profile fields from AI CV analysis',
+    summary: 'Update user profile from AI CV scan results',
+    description:
+      'Updates the authenticated user profile with data extracted from CV scan. ' +
+      'Maps: name→nom, phone→contact, experience→cvExperience, education→cvEducation, skills→cvSkills. ' +
+      'All fields are optional - only provided fields will be updated.',
   })
-  @ApiResponse({ status: 200, description: 'Profile updated from CV' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiBody({
+    type: CreateProfileFromCvDto,
+    description: 'CV data extracted from AI scan',
+    examples: {
+      fullProfile: {
+        summary: 'Complete CV data',
+        value: {
+          name: 'Jean Dupont',
+          email: 'jean.dupont@email.com',
+          phone: '+33 6 12 34 56 78',
+          experience: [
+            'Développeur Senior chez ABC Corp (2020-2024)',
+            'Développeur Junior chez XYZ Ltd (2018-2020)'
+          ],
+          education: [
+            'Master en Informatique - Université Paris (2018)',
+            'Licence en Mathématiques - Université Lyon (2016)'
+          ],
+          skills: ['JavaScript', 'TypeScript', 'Python', 'React', 'NestJS']
+        }
+      },
+      partial: {
+        summary: 'Partial CV data (only some fields)',
+        value: {
+          name: 'Marie Martin',
+          experience: ['Chef de projet chez Tech Inc'],
+          skills: ['Management', 'Agile', 'Scrum']
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile successfully updated from CV',
+    schema: {
+      example: {
+        _id: '507f1f77bcf86cd799439011',
+        nom: 'Jean Dupont',
+        email: 'jean.dupont@email.com',
+        contact: '+33 6 12 34 56 78',
+        cvExperience: [
+          'Développeur Senior chez ABC Corp (2020-2024)',
+          'Développeur Junior chez XYZ Ltd (2018-2020)'
+        ],
+        cvEducation: [
+          'Master en Informatique - Université Paris (2018)',
+          'Licence en Mathématiques - Université Lyon (2016)'
+        ],
+        cvSkills: ['JavaScript', 'TypeScript', 'Python', 'React', 'NestJS'],
+        role: 'user',
+        TrustXP: 100,
+        profileCompletion: 95,
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-15T10:30:00.000Z'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid input data',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Invalid input',
+        errors: [
+          { field: 'email', message: 'Must be a valid email address' }
+        ]
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - JWT token required' })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found',
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'User not found'
+      }
+    }
+  })
   @UseGuards(JwtAuthGuard)
   async createOrUpdateProfileFromCv(
     @CurrentUser() user: any,
@@ -341,6 +424,7 @@ export class UserController {
     const id = user.userId || user._id || user.id;
     return this.userService.createOrUpdateProfileFromCv(id, body);
   }
+
 
   @Get(':id/trust/level')
   @ApiBearerAuth()

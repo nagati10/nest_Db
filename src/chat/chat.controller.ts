@@ -32,26 +32,25 @@ import { diskStorage } from 'multer';
 import path from 'path';
 import { IsMongoId, IsNotEmpty } from 'class-validator';
 
-
 export class SaveInterviewResultDto {
-    @ApiProperty({ example: '507f1f77bcf86cd799439021', description: 'Chat ID' })
-    @IsNotEmpty()
-    @IsMongoId()
-    chat_id: string;
+  @ApiProperty({ example: '507f1f77bcf86cd799439021', description: 'Chat ID' })
+  @IsNotEmpty()
+  @IsMongoId()
+  chat_id: string;
 
-    @ApiProperty({ description: 'Interview analysis data' })
-    @IsNotEmpty()
-    analysis: any;
+  @ApiProperty({ description: 'Interview analysis data' })
+  @IsNotEmpty()
+  analysis: any;
 }
 
 @ApiTags('chat')
 @Controller('chat')
-@UseGuards(JwtAuthGuard)
-@ApiBearerAuth()
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Create or get existing chat' })
   @ApiResponse({ status: 200, description: 'Chat created or retrieved successfully' })
   async createOrGetChat(
@@ -63,6 +62,8 @@ export class ChatController {
   }
 
   @Post(':chatId/message')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Send message in chat' })
   @ApiResponse({ status: 200, description: 'Message sent successfully' })
   async sendMessage(
@@ -75,6 +76,8 @@ export class ChatController {
   }
 
   @Get('my-chats')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get all user chats' })
   @ApiResponse({ status: 200, description: 'Returns user chats' })
   async getUserChats(@CurrentUser() user: any) {
@@ -83,6 +86,8 @@ export class ChatController {
   }
 
   @Get(':chatId/messages')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get chat messages with pagination' })
   @ApiResponse({ status: 200, description: 'Returns chat messages' })
   async getChatMessages(
@@ -96,6 +101,8 @@ export class ChatController {
   }
 
   @Get(':chatId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get chat by ID' })
   @ApiResponse({ status: 200, description: 'Returns chat' })
   async getChatById(
@@ -107,6 +114,8 @@ export class ChatController {
   }
 
   @Patch(':chatId/block')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Block chat (entreprise only)' })
   @ApiResponse({ status: 200, description: 'Chat blocked successfully' })
   async blockChat(
@@ -119,6 +128,8 @@ export class ChatController {
   }
 
   @Patch(':chatId/unblock')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Unblock chat (entreprise only)' })
   @ApiResponse({ status: 200, description: 'Chat unblocked successfully' })
   async unblockChat(
@@ -130,6 +141,8 @@ export class ChatController {
   }
 
   @Patch(':chatId/accept')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Accept candidate (entreprise only)' })
   @ApiResponse({ status: 200, description: 'Candidate accepted successfully' })
   async acceptCandidate(
@@ -141,6 +154,8 @@ export class ChatController {
   }
 
   @Get('can-call/:offerId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Check if user can make call for offer' })
   @ApiResponse({ status: 200, description: 'Returns call permission' })
   async canMakeCall(
@@ -152,6 +167,8 @@ export class ChatController {
   }
 
   @Delete(':chatId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete chat' })
   @ApiResponse({ status: 200, description: 'Chat deleted successfully' })
   async deleteChat(
@@ -163,6 +180,8 @@ export class ChatController {
   }
 
   @Post('upload')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Upload chat media file' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -209,6 +228,8 @@ export class ChatController {
   }
 
   @Patch(':chatId/mark-read')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Mark messages as read' })
   @ApiResponse({ status: 200, description: 'Messages marked as read' })
   async markMessagesAsRead(
@@ -219,42 +240,41 @@ export class ChatController {
     return this.chatService.markMessagesAsRead(chatId, userId);
   }
 
-  // chat.controller.ts - endpoint with debug logging
   @Post('interview-result')
   @ApiOperation({ summary: 'Save interview result from AI analysis (called by Python backend)' })
   @ApiResponse({ status: 201, description: 'Interview result saved successfully' })
   async saveInterviewResult(
-      @Body() dto: SaveInterviewResultDto
+    @Body() dto: SaveInterviewResultDto
   ) {
-      console.log('='.repeat(80));
-      console.log('🌐 NESTJS_ENDPOINT: /chat/interview-result called');
-      console.log('='.repeat(80));
-      try {
-          console.log(`📥 NESTJS_ENDPOINT: Request body keys: ${Object.keys(dto || {}).join(', ')}`);
-          console.log(`📥 NESTJS_ENDPOINT: chat_id=${dto?.chat_id || 'MISSING'}`);
-          console.log(`📥 NESTJS_ENDPOINT: analysis present=${!!dto?.analysis}`);
-          if (!dto.chat_id) {
-              console.log(`❌ NESTJS_ENDPOINT: Missing chat_id`);
-              throw new Error('Missing chat_id');
-          }
-          if (!dto.analysis) {
-              console.log(`❌ NESTJS_ENDPOINT: Missing analysis data`);
-              throw new Error('Missing analysis data');
-          }
-          console.log(`🔄 NESTJS_ENDPOINT: Calling chatService.saveInterviewResult...`);
-          const result = await this.chatService.saveInterviewResult(dto.chat_id, dto.analysis);
-          console.log(`✅ NESTJS_ENDPOINT: Success! Message ID: ${result._id}`);
-          console.log('='.repeat(80));
-          return result;
-      } catch (error) {
-          console.log('='.repeat(80));
-          console.log(`❌ NESTJS_ENDPOINT: ERROR IN CONTROLLER`);
-          console.log(`❌ NESTJS_ENDPOINT: Error type: ${error?.constructor?.name || 'Unknown'}`);
-          console.log(`❌ NESTJS_ENDPOINT: Error message: ${error?.message || String(error)}`);
-          console.log(`❌ NESTJS_ENDPOINT: Stack trace:`);
-          console.error(error);
-          console.log('='.repeat(80));
-          throw error;
+    console.log('='.repeat(80));
+    console.log('🌐 NESTJS_ENDPOINT: /chat/interview-result called');
+    console.log('='.repeat(80));
+    try {
+      console.log(`📥 NESTJS_ENDPOINT: Request body keys: ${Object.keys(dto || {}).join(', ')}`);
+      console.log(`📥 NESTJS_ENDPOINT: chat_id=${dto?.chat_id || 'MISSING'}`);
+      console.log(`📥 NESTJS_ENDPOINT: analysis present=${!!dto?.analysis}`);
+      if (!dto.chat_id) {
+        console.log(`❌ NESTJS_ENDPOINT: Missing chat_id`);
+        throw new Error('Missing chat_id');
       }
+      if (!dto.analysis) {
+        console.log(`❌ NESTJS_ENDPOINT: Missing analysis data`);
+        throw new Error('Missing analysis data');
+      }
+      console.log(`🔄 NESTJS_ENDPOINT: Calling chatService.saveInterviewResult...`);
+      const result = await this.chatService.saveInterviewResult(dto.chat_id, dto.analysis);
+      console.log(`✅ NESTJS_ENDPOINT: Success! Message ID: ${result._id}`);
+      console.log('='.repeat(80));
+      return result;
+    } catch (error) {
+      console.log('='.repeat(80));
+      console.log(`❌ NESTJS_ENDPOINT: ERROR IN CONTROLLER`);
+      console.log(`❌ NESTJS_ENDPOINT: Error type: ${error?.constructor?.name || 'Unknown'}`);
+      console.log(`❌ NESTJS_ENDPOINT: Error message: ${error?.message || String(error)}`);
+      console.log(`❌ NESTJS_ENDPOINT: Stack trace:`);
+      console.error(error);
+      console.log('='.repeat(80));
+      throw error;
+    }
   }
 }

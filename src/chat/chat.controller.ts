@@ -21,6 +21,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOperation,
+  ApiProperty,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -29,6 +30,19 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import path from 'path';
+import { IsMongoId, IsNotEmpty } from 'class-validator';
+
+
+export class SaveInterviewResultDto {
+    @ApiProperty({ example: '507f1f77bcf86cd799439021', description: 'Chat ID' })
+    @IsNotEmpty()
+    @IsMongoId()
+    chat_id: string;
+
+    @ApiProperty({ description: 'Interview analysis data' })
+    @IsNotEmpty()
+    analysis: any;
+}
 
 @ApiTags('chat')
 @Controller('chat')
@@ -203,5 +217,14 @@ export class ChatController {
   ) {
     const userId = user.userId || user._id || user.id;
     return this.chatService.markMessagesAsRead(chatId, userId);
+  }
+
+  @Post('interview-result')
+  @ApiOperation({ summary: 'Save interview result from AI analysis (called by Python backend)' })
+  @ApiResponse({ status: 201, description: 'Interview result saved successfully' })
+  async saveInterviewResult(
+    @Body() dto: SaveInterviewResultDto
+  ) {
+    return this.chatService.saveInterviewResult(dto.chat_id, dto.analysis);
   }
 }

@@ -9,7 +9,8 @@ export enum MessageType {
   IMAGE = 'image',
   VIDEO = 'video',
   AUDIO = 'audio',
-  EMOJI = 'emoji'
+  EMOJI = 'emoji',
+  INTERVIEW_RESULT = 'interview_result' // ⭐ NEW
 }
 
 @Schema({ timestamps: true, versionKey: false })
@@ -78,6 +79,26 @@ export class Message {
   @ApiProperty({ example: '507f1f77bcf86cd799439022', description: 'Replied message ID' })
   @Prop({ type: Types.ObjectId, ref: 'Message' })
   replyTo: Types.ObjectId;
+
+
+  @Prop({ type: Object })
+interviewAnalysis?: {
+  candidateName: string;
+  position: string;
+  completionPercentage: number;
+  overallScore: number; // 0-100
+  strengths: string[];
+  weaknesses: string[];
+  questionAnalysis: Array<{
+    question: string;
+    answer: string;
+    score: number;
+    feedback: string;
+  }>;
+  recommendation: 'STRONG_HIRE' | 'HIRE' | 'MAYBE' | 'NO_HIRE';
+  summary: string;
+  interviewDuration: string;
+};
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);

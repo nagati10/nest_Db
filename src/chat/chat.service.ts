@@ -411,4 +411,101 @@ export class ChatService {
 
     return { message: 'Messages marked as read' };
   }
+
+
+  async saveInterviewResult(
+    chatId: string,
+    analysis: any
+): Promise<MessageDocument> {
+    // Find chat
+    const chat = await this.chatModel.findById(chatId).exec();
+    if (!chat) {
+        throw new NotFoundException('Chat not found');
+    }
+
+    // Format the interview result message content
+    const recommendationEmoji = {
+        'STRONG_HIRE': '🌟',
+        'HIRE': '✅',
+        'MAYBE': '🤔',
+        'NO_HIRE': '❌'
+    }[analysis.recommendation] || '📊';
+
+    const durationParts = analysis.interview_duration.split(':');
+    const minutes = durationParts[0] || '0';
+    const seconds = durationParts[1] || '00';
+
+    let messageContent = `📊 **Interview Results - ${analysis.candidate_name}**\n\n`;
+    messageContent += `**Position:** ${analysis.position}\n`;
+    messageContent += `**Completion:** ${analysis.completion_percentage}%\n`;
+    messageContent += `**Duration:** ${minutes}:${seconds}\n`;
+    messageContent += `**Overall Score:** ${analysis.overall_score}/100\n\n`;
+    messageContent += `✅ **STRENGTHS:**\n`;
+    analysis.strengths.forEach(s => {
+        messageContent += `• ${s}\n`;
+    });
+    messageContent += `\n⚠️ **AREAS FOR IMPROVEMENT:**\n`;
+    analysis.weaknesses.forEach(w => {
+        messageContent += `• ${w}\n`;
+    });
+    messageContent += `\n📝 **DETAILED FEEDBACK:**\n`;
+    analysis.question_analysis.slice(0, 5).forEach((qa, idx) => {
+        messageContent += `\n**Q${idx + 1}:** ${qa.question.substring(0, 80)}...\n`;
+        messageContent += `**Score:** ${qa.score}/10\n`;
+        messageContent += `**Feedback:** ${qa.feedback}\n`;
+    });
+    messageContent += `\n${recommendationEmoji} **RECOMMENDATION:** ${analysis.recommendation}\n\n`;
+    messageContent += analysis.summary;
+
+    // Create interview result message
+    const messageData = {
+        chat: new Types.ObjectId(chatId),
+        sender: chat.candidate, // Student is sender
+        type: MessageType.INTERVIEW_RESULT,
+        content: messageContent,
+        interviewAnalysis: {
+            candidateName: analysis.candidate_name,
+            position: analysis.position,
+            completionPercentage: analysis.completion_percentage,
+            overallScore: analysis.overall_score,
+            strengths: analysis.strengths,
+            weaknesses: analysis.weaknesses,
+            questionAnalysis: analysis.question_analysis.map(qa => ({
+                question: qa.question,
+                answer: qa.answer,
+                score: qa.score,
+                feedback: qa.feedback
+            })),
+            recommendation: analysis.recommendation,
+            summary: analysis.summary,
+            interviewDuration: analysis.interview_duration
+        }
+    };
+
+    const createdMessage = new this.messageModel(messageData);
+    const savedMessage = await createdMessage.save();
+
+    // Update chat last activity
+    await this.chatModel.findByIdAndUpdate(chatId, {
+        lastActivity: new Date(),
+        lastMessage: `📊 Interview Results - ${analysis.overall_score}/100`,
+        lastMessageType: MessageType.INTERVIEW_RESULT,
+        $inc: {
+            unreadEntreprise: 1 // Notify enterprise
+        }
+    }).exec();
+
+    // Return populated message
+    const populatedMessage = await this.messageModel
+        .findById(savedMessage._id)
+        .populate('sender', 'nom email image')
+        .exec();
+
+    if (!populatedMessage) {
+        throw new NotFoundException('Message not found after creation');
+    }
+
+    return populatedMessage;
+}
+
 }

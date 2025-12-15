@@ -414,98 +414,130 @@ export class ChatService {
 
 
   async saveInterviewResult(
-    chatId: string,
-    analysis: any
-): Promise<MessageDocument> {
-    // Find chat
-    const chat = await this.chatModel.findById(chatId).exec();
-    if (!chat) {
-        throw new NotFoundException('Chat not found');
-    }
-
-    // Format the interview result message content
-    const recommendationEmoji = {
-        'STRONG_HIRE': '🌟',
-        'HIRE': '✅',
-        'MAYBE': '🤔',
-        'NO_HIRE': '❌'
-    }[analysis.recommendation] || '📊';
-
-    const durationParts = analysis.interview_duration.split(':');
-    const minutes = durationParts[0] || '0';
-    const seconds = durationParts[1] || '00';
-
-    let messageContent = `📊 **Interview Results - ${analysis.candidate_name}**\n\n`;
-    messageContent += `**Position:** ${analysis.position}\n`;
-    messageContent += `**Completion:** ${analysis.completion_percentage}%\n`;
-    messageContent += `**Duration:** ${minutes}:${seconds}\n`;
-    messageContent += `**Overall Score:** ${analysis.overall_score}/100\n\n`;
-    messageContent += `✅ **STRENGTHS:**\n`;
-    analysis.strengths.forEach(s => {
-        messageContent += `• ${s}\n`;
-    });
-    messageContent += `\n⚠️ **AREAS FOR IMPROVEMENT:**\n`;
-    analysis.weaknesses.forEach(w => {
-        messageContent += `• ${w}\n`;
-    });
-    messageContent += `\n📝 **DETAILED FEEDBACK:**\n`;
-    analysis.question_analysis.slice(0, 5).forEach((qa, idx) => {
-        messageContent += `\n**Q${idx + 1}:** ${qa.question.substring(0, 80)}...\n`;
-        messageContent += `**Score:** ${qa.score}/10\n`;
-        messageContent += `**Feedback:** ${qa.feedback}\n`;
-    });
-    messageContent += `\n${recommendationEmoji} **RECOMMENDATION:** ${analysis.recommendation}\n\n`;
-    messageContent += analysis.summary;
-
-    // Create interview result message
-    const messageData = {
-        chat: new Types.ObjectId(chatId),
-        sender: chat.candidate, // Student is sender
-        type: MessageType.INTERVIEW_RESULT,
-        content: messageContent,
-        interviewAnalysis: {
-            candidateName: analysis.candidate_name,
-            position: analysis.position,
-            completionPercentage: analysis.completion_percentage,
-            overallScore: analysis.overall_score,
-            strengths: analysis.strengths,
-            weaknesses: analysis.weaknesses,
-            questionAnalysis: analysis.question_analysis.map(qa => ({
-                question: qa.question,
-                answer: qa.answer,
-                score: qa.score,
-                feedback: qa.feedback
-            })),
-            recommendation: analysis.recommendation,
-            summary: analysis.summary,
-            interviewDuration: analysis.interview_duration
-        }
-    };
-
-    const createdMessage = new this.messageModel(messageData);
-    const savedMessage = await createdMessage.save();
-
-    // Update chat last activity
-    await this.chatModel.findByIdAndUpdate(chatId, {
-        lastActivity: new Date(),
-        lastMessage: `📊 Interview Results - ${analysis.overall_score}/100`,
-        lastMessageType: MessageType.INTERVIEW_RESULT,
-        $inc: {
-            unreadEntreprise: 1 // Notify enterprise
-        }
-    }).exec();
-
-    // Return populated message
-    const populatedMessage = await this.messageModel
-        .findById(savedMessage._id)
-        .populate('sender', 'nom email image')
-        .exec();
-
-    if (!populatedMessage) {
-        throw new NotFoundException('Message not found after creation');
-    }
-
-    return populatedMessage;
-}
+      chatId: string,
+      analysis: any
+  ): Promise < MessageDocument > {
+      console.log('='.repeat(80));
+      console.log('🔍 NESTJS_INTERVIEW: saveInterviewResult called');
+      console.log('='.repeat(80));
+      try {
+          console.log(`📊 NESTJS_INTERVIEW: chatId=${chatId}`);
+          console.log(`📊 NESTJS_INTERVIEW: analysis keys=${Object.keys(analysis || {}).join(', ')}`);
+          console.log(`📊 NESTJS_INTERVIEW: candidate_name=${analysis?.candidate_name || 'N/A'}`);
+          console.log(`📊 NESTJS_INTERVIEW: position=${analysis?.position || 'N/A'}`);
+          console.log(`📊 NESTJS_INTERVIEW: overall_score=${analysis?.overall_score || 'N/A'}`);
+          console.log(`📊 NESTJS_INTERVIEW: recommendation=${analysis?.recommendation || 'N/A'}`);
+          // Find chat
+          console.log(`🔍 NESTJS_INTERVIEW: Looking up chat with ID: ${chatId}`);
+          const chat = await this.chatModel.findById(chatId).exec();
+          if(!chat) {
+              console.log(`❌ NESTJS_INTERVIEW: Chat not found: ${chatId}`);
+              throw new NotFoundException('Chat not found');
+          }
+          
+          console.log(`✅ NESTJS_INTERVIEW: Chat found`);
+          console.log(`👥 NESTJS_INTERVIEW: candidate=${chat.candidate}`);
+          console.log(`🏢 NESTJS_INTERVIEW: entreprise=${chat.entreprise}`);
+          // Format the interview result message content
+          const recommendationEmoji = {
+              'STRONG_HIRE': '🌟',
+              'HIRE': '✅',
+              'MAYBE': '🤔',
+              'NO_HIRE': '❌'
+          }[analysis.recommendation] || '📊';
+          console.log(`🎨 NESTJS_INTERVIEW: Building message content...`);
+          const durationParts = analysis.interview_duration?.split(':') || ['0', '00'];
+          const minutes = durationParts[0] || '0';
+          const seconds = durationParts[1] || '00';
+          let messageContent = `📊 **Interview Results - ${analysis.candidate_name}**\n\n`;
+          messageContent += `**Position:** ${analysis.position}\n`;
+      messageContent += `**Completion:** ${analysis.completion_percentage}%\n`;
+  messageContent += `**Duration:** ${minutes}:${seconds}\n`;
+  messageContent += `**Overall Score:** ${analysis.overall_score}/100\n\n`;
+  messageContent += `✅ **STRENGTHS:**\n`;
+  (analysis.strengths || []).forEach(s => {
+      messageContent += `• ${s}\n`;
+  });
+  messageContent += `\n⚠️ **AREAS FOR IMPROVEMENT:**\n`;
+  (analysis.weaknesses || []).forEach(w => {
+      messageContent += `• ${w}\n`;
+  });
+  messageContent += `\n📝 **DETAILED FEEDBACK:**\n`;
+  (analysis.question_analysis || []).slice(0, 5).forEach((qa, idx) => {
+      messageContent += `\n**Q${idx + 1}:** ${qa.question?.substring(0, 80) || 'N/A'}...\n`;
+      messageContent += `**Score:** ${qa.score || 0}/10\n`;
+      messageContent += `**Feedback:** ${qa.feedback || 'N/A'}\n`;
+  });
+  messageContent += `\n${recommendationEmoji} **RECOMMENDATION:** ${analysis.recommendation}\n\n`;
+  messageContent += analysis.summary || 'No summary available';
+  console.log(`📝 NESTJS_INTERVIEW: Message content length: ${messageContent.length} chars`);
+  // Create interview result message
+  console.log(`💾 NESTJS_INTERVIEW: Creating message document...`);
+  const messageData = {
+      chat: new Types.ObjectId(chatId),
+      sender: chat.candidate, // Student is sender
+      type: MessageType.INTERVIEW_RESULT,
+      content: messageContent,
+      interviewAnalysis: {
+          candidateName: analysis.candidate_name,
+          position: analysis.position,
+          completionPercentage: analysis.completion_percentage,
+          overallScore: analysis.overall_score,
+          strengths: analysis.strengths || [],
+          weaknesses: analysis.weaknesses || [],
+          questionAnalysis: (analysis.question_analysis || []).map(qa => ({
+              question: qa.question || '',
+              answer: qa.answer || '',
+              score: qa.score || 0,
+              feedback: qa.feedback || ''
+          })),
+          recommendation: analysis.recommendation,
+          summary: analysis.summary || '',
+          interviewDuration: analysis.interview_duration || 'N/A'
+      }
+  };
+  console.log(`📦 NESTJS_INTERVIEW: Message data prepared`);
+  console.log(`📦 NESTJS_INTERVIEW: sender=${messageData.sender}`);
+  console.log(`📦 NESTJS_INTERVIEW: type=${messageData.type}`);
+  const createdMessage = new this.messageModel(messageData);
+  console.log(`💾 NESTJS_INTERVIEW: Saving message to database...`);
+  const savedMessage = await createdMessage.save();
+  console.log(`✅ NESTJS_INTERVIEW: Message saved with ID: ${savedMessage._id}`);
+  // Update chat last activity
+  console.log(`🔄 NESTJS_INTERVIEW: Updating chat last activity...`);
+  await this.chatModel.findByIdAndUpdate(chatId, {
+      lastActivity: new Date(),
+      lastMessage: `📊 Interview Results - ${analysis.overall_score}/100`,
+      lastMessageType: MessageType.INTERVIEW_RESULT,
+      $inc: {
+          unreadEntreprise: 1 // Notify enterprise
+      }
+  }).exec();
+  console.log(`✅ NESTJS_INTERVIEW: Chat updated`);
+  // Return populated message
+  console.log(`🔍 NESTJS_INTERVIEW: Populating message...`);
+  const populatedMessage = await this.messageModel
+      .findById(savedMessage._id)
+      .populate('sender', 'nom email image')
+      .exec();
+  if (!populatedMessage) {
+      console.log(`❌ NESTJS_INTERVIEW: Message not found after creation`);
+      throw new NotFoundException('Message not found after creation');
+  }
+  console.log(`✅ NESTJS_INTERVIEW: Successfully completed`);
+  console.log('='.repeat(80));
+  return populatedMessage;
+          
+      } catch (error) {
+      console.log('='.repeat(80));
+      console.log(`❌ NESTJS_INTERVIEW: ERROR OCCURRED`);
+      console.log(`❌ NESTJS_INTERVIEW: Error type: ${error?.constructor?.name || 'Unknown'}`);
+      console.log(`❌ NESTJS_INTERVIEW: Error message: ${error?.message || String(error)}`);
+      console.log(`❌ NESTJS_INTERVIEW: Stack trace:`);
+      console.error(error);
+      console.log('='.repeat(80));
+      throw error;
+  }
+  }
 
 }

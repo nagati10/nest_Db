@@ -219,12 +219,42 @@ export class ChatController {
     return this.chatService.markMessagesAsRead(chatId, userId);
   }
 
+  // chat.controller.ts - endpoint with debug logging
   @Post('interview-result')
   @ApiOperation({ summary: 'Save interview result from AI analysis (called by Python backend)' })
   @ApiResponse({ status: 201, description: 'Interview result saved successfully' })
   async saveInterviewResult(
-    @Body() dto: SaveInterviewResultDto
+      @Body() dto: SaveInterviewResultDto
   ) {
-    return this.chatService.saveInterviewResult(dto.chat_id, dto.analysis);
+      console.log('='.repeat(80));
+      console.log('🌐 NESTJS_ENDPOINT: /chat/interview-result called');
+      console.log('='.repeat(80));
+      try {
+          console.log(`📥 NESTJS_ENDPOINT: Request body keys: ${Object.keys(dto || {}).join(', ')}`);
+          console.log(`📥 NESTJS_ENDPOINT: chat_id=${dto?.chat_id || 'MISSING'}`);
+          console.log(`📥 NESTJS_ENDPOINT: analysis present=${!!dto?.analysis}`);
+          if (!dto.chat_id) {
+              console.log(`❌ NESTJS_ENDPOINT: Missing chat_id`);
+              throw new Error('Missing chat_id');
+          }
+          if (!dto.analysis) {
+              console.log(`❌ NESTJS_ENDPOINT: Missing analysis data`);
+              throw new Error('Missing analysis data');
+          }
+          console.log(`🔄 NESTJS_ENDPOINT: Calling chatService.saveInterviewResult...`);
+          const result = await this.chatService.saveInterviewResult(dto.chat_id, dto.analysis);
+          console.log(`✅ NESTJS_ENDPOINT: Success! Message ID: ${result._id}`);
+          console.log('='.repeat(80));
+          return result;
+      } catch (error) {
+          console.log('='.repeat(80));
+          console.log(`❌ NESTJS_ENDPOINT: ERROR IN CONTROLLER`);
+          console.log(`❌ NESTJS_ENDPOINT: Error type: ${error?.constructor?.name || 'Unknown'}`);
+          console.log(`❌ NESTJS_ENDPOINT: Error message: ${error?.message || String(error)}`);
+          console.log(`❌ NESTJS_ENDPOINT: Stack trace:`);
+          console.error(error);
+          console.log('='.repeat(80));
+          throw error;
+      }
   }
 }

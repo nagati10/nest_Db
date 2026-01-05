@@ -99,12 +99,16 @@ export class ScheduleService {
     try {
       this.logger.log('Converting PDF to images using pdfjs-dist...');
       
-      // Importer pdfjs-dist dynamiquement
+      // Importer pdfjs-dist v3.x (better Node.js support)
+      // v3.x has reliable legacy build path
       const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
       const { createCanvas } = require('canvas');
 
       // Charger le document PDF
-      const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
+      const loadingTask = pdfjsLib.getDocument({ 
+        data: new Uint8Array(pdfBuffer),
+        useSystemFonts: true,
+      });
       const pdfDocument = await loadingTask.promise;
       const numPages = pdfDocument.numPages;
 
@@ -171,7 +175,7 @@ export class ScheduleService {
       
       if (error.message.includes('Cannot find module') || error.code === 'MODULE_NOT_FOUND') {
         throw new BadRequestException(
-          'PDF processing libraries are required. Please install: npm install pdfjs-dist canvas pdf-lib sharp'
+          'PDF processing libraries are required. Please install: npm install pdfjs-dist@^3.11.174 canvas pdf-lib sharp'
         );
       }
       

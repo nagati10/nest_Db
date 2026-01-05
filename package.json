@@ -9,7 +9,7 @@
     "preinstall": "echo \"📦 Installing dependencies...\"",
     "postinstall": "echo \"✅ Dependencies installed successfully!\"",
     "setup": "npm install && echo \"🚀 Setup complete! Run 'npm run start:dev' to start development\"",
-    "prestart:dev": "node -e \"const fs = require('fs'); const deps = ['@nestjs/config', 'bcryptjs', 'bcrypt', '@nestjs/jwt', '@nestjs/mongoose', '@nestjs/passport', 'passport-jwt', 'mongoose', '@nestjs/swagger', 'class-validator', 'class-transformer', 'google-auth-library']; const missing = deps.filter(dep => !fs.existsSync('node_modules/' + dep)); if (missing.length > 0) { console.log('📦 Installing missing dependencies:', missing.join(', ')); require('child_process').execSync('npm install', {stdio: 'inherit'}); }\"",
+    "prestart:dev": "node -e \"const fs = require('fs'); const deps = ['@nestjs/config', 'bcryptjs', 'bcrypt', '@nestjs/jwt', '@nestjs/mongoose', '@nestjs/passport', 'passport-jwt', 'mongoose', '@nestjs/swagger', 'class-validator', 'class-transformer', 'google-auth-library', '@huggingface/inference', '@nestjs/cache-manager', 'cache-manager', '@google/generative-ai', 'sharp']; const missing = deps.filter(dep => !fs.existsSync('node_modules/' + dep)); if (missing.length > 0) { console.log('📦 Installing missing dependencies:', missing.join(', ')); require('child_process').execSync('npm install', {stdio: 'inherit'}); }\"",
     "start:dev": "nest start --watch",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -24,7 +24,10 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@gradio/client": "^2.0.0",
+    "@huggingface/inference": "^4.13.5",
+    "@nestjs/cache-manager": "^3.1.0",
     "@nestjs/common": "^11.1.8",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.8",
@@ -39,6 +42,8 @@
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^2.4.3",
+    "cache-manager": "^7.2.7",
+    "cache-manager-redis-store": "^3.0.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "express": "^5.1.0",
@@ -52,6 +57,7 @@
     "pdf-parse": "^1.1.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.34.5",
     "socket.io": "^4.8.1",
     "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^6.0.1"

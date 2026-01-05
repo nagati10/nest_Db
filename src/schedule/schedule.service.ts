@@ -115,8 +115,8 @@ export class ScheduleService {
       this.logger.log(`PDF has ${numPages} pages`);
 
       const images: Buffer[] = [];
-      // Higher scale for better OCR quality (4.0 = ~600 DPI, optimal for text recognition)
-      const scale = 4.0;
+      // Balanced scale for OCR quality and performance (3.5 = ~525 DPI, good balance)
+      const scale = 3.5;
 
       // Convertir chaque page
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
@@ -152,17 +152,17 @@ export class ScheduleService {
           // Convertir le canvas en buffer PNG
           const imageBuffer = canvas.toBuffer('image/png');
           
-          // Utiliser Sharp pour optimiser l'image pour OCR (keep color, better for complex layouts)
+          // Utiliser Sharp pour optimiser l'image pour OCR (optimized for speed)
           try {
             const optimizedBuffer = await sharp(imageBuffer)
               // Keep color - sometimes helps OCR with colored text/backgrounds
               .ensureAlpha() // Ensure alpha channel
               .normalize() // Enhance contrast
-              .sharpen(1.5, 1, 2) // Stronger sharpening for text (sigma, flat, jagged)
+              .sharpen(1.2, 1, 1.5) // Moderate sharpening (faster than heavy sharpening)
               .png({ 
-                quality: 100, 
-                compressionLevel: 0, // No compression for maximum quality
-                adaptiveFiltering: true 
+                quality: 95, // Slightly lower quality for faster processing
+                compressionLevel: 3, // Moderate compression for speed
+                adaptiveFiltering: false // Disable for speed
               })
               .toBuffer();
             
@@ -205,6 +205,7 @@ export class ScheduleService {
    */
   async callTesseractOCR(imageBuffer: Buffer): Promise<string> {
     let tempImagePath: string | null = null;
+    const startTime = Date.now();
     
     try {
       this.logger.log('Starting Tesseract OCR...');
@@ -216,29 +217,50 @@ export class ScheduleService {
       // Sauvegarder le buffer dans un fichier temporaire
       fs.writeFileSync(tempImagePath, imageBuffer);
       
-      // Créer un worker Tesseract avec support français et anglais
+      // Créer un worker Tesseract avec support français et anglais (optimized for speed)
       const worker = await createWorker('fra+eng', 1, {
         logger: (m) => {
           if (m.status === 'recognizing text') {
             this.logger.debug(`OCR progress: ${Math.round(m.progress * 100)}%`);
           }
         },
+        cachePath: path.join(os.tmpdir(), 'tesseract-cache'), // Cache for faster subsequent runs
       });
       
-      // Configurer Tesseract pour meilleure reconnaissance
-      // PSM 6 = Assume a single uniform block of text (good for schedules)
-      // PSM 11 = Sparse text (if schedule has gaps)
-      // PSM 12 = Sparse text with OSD (Orientation and Script Detection)
+      // Configurer Tesseract pour meilleure reconnaissance de tableaux (optimized)
       await worker.setParameters({
-        tessedit_pageseg_mode: '6' as any, // Try uniform block first
+        tessedit_pageseg_mode: '4' as any, // Better for table/grid formats
         tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ :/-()[].,;!?',
         preserve_interword_spaces: '1',
+        tessedit_ocr_engine_mode: '1', // Use LSTM OCR engine
+        // Performance optimizations
+        classify_bln_numeric_mode: '0', // Disable numeric mode for speed
+        textord_min_linesize: '2.5', // Optimize line detection
       });
       
-      // Effectuer l'OCR sur le fichier temporaire avec meilleure configuration
-      const { data: { text } } = await worker.recognize(tempImagePath, {
-        rectangle: undefined, // Process entire image
-      });
+      // Effectuer l'OCR avec timeout protection (45 seconds max per page)
+      let text: string;
+      try {
+        const ocrPromise = worker.recognize(tempImagePath, {
+          rectangle: undefined, // Process entire image
+        });
+        
+        // Add timeout protection
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('OCR timeout after 45 seconds')), 45000);
+        });
+        
+        const result = await Promise.race([ocrPromise, timeoutPromise]);
+        text = result.data.text;
+      } catch (error: any) {
+        // Ensure worker is terminated even on timeout/error
+        try {
+          await worker.terminate();
+        } catch (e) {
+          // Ignore termination errors
+        }
+        throw error;
+      }
       
       // Terminer le worker
       await worker.terminate();
@@ -257,7 +279,7 @@ export class ScheduleService {
         throw new BadRequestException('OCR returned empty result');
       }
       
-      this.logger.log(`Tesseract OCR extracted ${text.length} characters`);
+      this.logger.log(`Tesseract OCR extracted ${text.length} characters in ${Date.now() - startTime}ms`);
       // Log les 500 premiers caractères pour debug
       if (text.length > 0) {
         this.logger.debug(`OCR text preview: ${text.substring(0, Math.min(500, text.length))}...`);
@@ -281,7 +303,14 @@ export class ScheduleService {
    * Parse le texte OCR en JSON structuré
    */
   parseScheduleTextToJSON(text: string): Course[] {
-    // D'abord essayer le parser spécifique ESPRIT
+    // D'abord essayer le parser pour format grid/tableau (format ESPRIT standard)
+    const gridCourses = this.parseGridSchedule(text);
+    if (gridCourses.length > 0) {
+      this.logger.log(`Grid parser found ${gridCourses.length} courses`);
+      return gridCourses;
+    }
+    
+    // Ensuite essayer le parser spécifique ESPRIT (format texte)
     const espritCourses = this.parseESPRITSchedule(text);
     if (espritCourses.length > 0) {
       return espritCourses;
@@ -599,6 +628,185 @@ export class ScheduleService {
     }
     
     return courseName.length > 5 ? this.cleanOCRText(courseName) : null;
+  }
+
+  /**
+   * Parser pour format grid/tableau (jours en colonnes, heures en lignes)
+   * Format: ESPRIT grid timetable
+   */
+  private parseGridSchedule(text: string): Course[] {
+    const courses: Course[] = [];
+    const cleanedText = this.cleanOCRText(text);
+    const lines = cleanedText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    // Pattern pour détecter les cours dans le format grid
+    // Ex: "COMMUNICATION, CULTURE AND CITIZENSHIP F1" avec "09:00 - 12:15" et "A12"
+    // Ou: "PROCEDURAL PROGRAMMING 1" avec horaires et salle
+    
+    // Chercher les patterns de cours avec horaires
+    // Format 1: "COURSE NAME" suivi de "HH:MM - HH:MM" et "A12" ou similaire
+    const coursePattern = /([A-Z][A-Z\s,()&'-]+?)\s+(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})\s+([A-Z]\d{2,3}|En\s+Ligne)/gi;
+    
+    // Chercher aussi sans salle explicite
+    const coursePatternNoRoom = /([A-Z][A-Z\s,()&'-]{10,}?)\s+(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/gi;
+    
+    let currentDay: string | null = null;
+    let lastDayIndex = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Détecter un jour (peut être dans une ligne de header)
+      const dayMatch = this.detectDay(line);
+      if (dayMatch) {
+        currentDay = dayMatch;
+        lastDayIndex = i;
+        this.logger.debug(`📅 Grid: Day found: ${currentDay} at line ${i}`);
+        continue;
+      }
+      
+      // Si on a un jour, chercher les cours dans les lignes suivantes
+      if (currentDay && i > lastDayIndex) {
+        // Chercher pattern avec salle
+        let match;
+        while ((match = coursePattern.exec(line)) !== null) {
+          const subject = match[1].trim();
+          const startHour = match[2].padStart(2, '0');
+          const startMin = match[3];
+          const endHour = match[4].padStart(2, '0');
+          const endMin = match[5];
+          const classroom = match[6];
+          
+          if (subject.length > 5) {
+            courses.push({
+              day: currentDay,
+              start: `${startHour}:${startMin}`,
+              end: `${endHour}:${endMin}`,
+              subject: this.cleanOCRText(subject),
+              classroom: classroom,
+            });
+            this.logger.debug(`✅ Grid: Found course: ${subject} on ${currentDay} at ${startHour}:${startMin}`);
+          }
+        }
+        
+        // Réinitialiser le regex
+        coursePattern.lastIndex = 0;
+        
+        // Chercher pattern sans salle
+        while ((match = coursePatternNoRoom.exec(line)) !== null) {
+          const subject = match[1].trim();
+          const startHour = match[2].padStart(2, '0');
+          const startMin = match[3];
+          const endHour = match[4].padStart(2, '0');
+          const endMin = match[5];
+          
+          if (subject.length > 5) {
+            // Chercher salle dans les lignes autour
+            let classroom: string | undefined;
+            for (let j = Math.max(0, i - 2); j < Math.min(i + 3, lines.length); j++) {
+              const nearLine = lines[j];
+              const roomMatch = nearLine.match(/\b([A-Z]\d{2,3}|En\s+Ligne)\b/i);
+              if (roomMatch) {
+                classroom = roomMatch[1];
+                break;
+              }
+            }
+            
+            courses.push({
+              day: currentDay,
+              start: `${startHour}:${startMin}`,
+              end: `${endHour}:${endMin}`,
+              subject: this.cleanOCRText(subject),
+              classroom: classroom,
+            });
+            this.logger.debug(`✅ Grid: Found course (no room): ${subject} on ${currentDay} at ${startHour}:${startMin}`);
+          }
+        }
+        
+        coursePatternNoRoom.lastIndex = 0;
+      }
+    }
+    
+    // Si pas de cours trouvés avec le pattern grid, essayer une approche plus flexible
+    if (courses.length === 0) {
+      return this.parseGridScheduleFlexible(cleanedText);
+    }
+    
+    return courses;
+  }
+  
+  /**
+   * Parser flexible pour grid - cherche les cours même si le format est moins structuré
+   */
+  private parseGridScheduleFlexible(text: string): Course[] {
+    const courses: Course[] = [];
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    let currentDay: string | null = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Détecter jour
+      const dayMatch = this.detectDay(line);
+      if (dayMatch) {
+        currentDay = dayMatch;
+        continue;
+      }
+      
+      if (!currentDay) continue;
+      
+      // Chercher noms de cours en majuscules (format ESPRIT)
+      // Ex: "COMMUNICATION, CULTURE AND CITIZENSHIP F1"
+      const uppercaseCourseMatch = line.match(/^([A-Z][A-Z\s,()&'-]{15,})/);
+      if (uppercaseCourseMatch) {
+        const subject = uppercaseCourseMatch[1].trim();
+        
+        // Chercher horaires dans la même ligne ou lignes suivantes
+        let startTime: string | null = null;
+        let endTime: string | null = null;
+        let classroom: string | undefined;
+        
+        // Chercher dans la ligne actuelle
+        const timeMatch = line.match(/(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/);
+        if (timeMatch) {
+          startTime = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`;
+          endTime = `${timeMatch[3].padStart(2, '0')}:${timeMatch[4]}`;
+        }
+        
+        // Chercher salle
+        const roomMatch = line.match(/\b([A-Z]\d{2,3}|En\s+Ligne)\b/i);
+        if (roomMatch) {
+          classroom = roomMatch[1];
+        }
+        
+        // Si pas trouvé, chercher dans les 2 lignes suivantes
+        if (!startTime) {
+          for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+            const nextLine = lines[j];
+            const nextTimeMatch = nextLine.match(/(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/);
+            if (nextTimeMatch) {
+              startTime = `${nextTimeMatch[1].padStart(2, '0')}:${nextTimeMatch[2]}`;
+              endTime = `${nextTimeMatch[3].padStart(2, '0')}:${nextTimeMatch[4]}`;
+              break;
+            }
+          }
+        }
+        
+        if (startTime && endTime && subject.length > 10) {
+          courses.push({
+            day: currentDay,
+            start: startTime,
+            end: endTime,
+            subject: this.cleanOCRText(subject),
+            classroom: classroom,
+          });
+          this.logger.debug(`✅ Grid Flexible: Found course: ${subject} on ${currentDay}`);
+        }
+      }
+    }
+    
+    return courses;
   }
 
   /**

@@ -93,114 +93,90 @@ export class ScheduleService {
 
   /**
    * Convertit un PDF en tableau d'images (buffers)
+   * Utilise pdfjs-dist et canvas (pure JavaScript, pas besoin de GraphicsMagick)
    */
   async convertPdfToImages(pdfBuffer: Buffer): Promise<Buffer[]> {
     try {
-      // Créer un fichier temporaire pour le PDF
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-process-'));
-      const tempPdfPath = path.join(tempDir, 'input.pdf');
+      this.logger.log('Converting PDF to images using pdfjs-dist...');
       
-      fs.writeFileSync(tempPdfPath, pdfBuffer);
+      // Importer pdfjs-dist dynamiquement
+      const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+      const { createCanvas } = require('canvas');
 
-      // Utiliser pdf-poppler pour convertir le PDF en images
-      const pdf2pic = require('pdf2pic');
-      
-      const convert = pdf2pic.fromPath(tempPdfPath, {
-        density: 300, // DPI élevé pour meilleure qualité OCR
-        saveFilename: 'page',
-        savePath: tempDir,
-        format: 'png',
-        width: 2000,
-        height: 2000,
-      });
+      // Charger le document PDF
+      const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
+      const pdfDocument = await loadingTask.promise;
+      const numPages = pdfDocument.numPages;
 
-      // Lire le nombre de pages du PDF
-      const PDFDocument = require('pdf-lib').PDFDocument;
-      const pdfDoc = await PDFDocument.load(pdfBuffer);
-      const numPages = pdfDoc.getPageCount();
+      this.logger.log(`PDF has ${numPages} pages`);
 
       const images: Buffer[] = [];
+      const scale = 2.0; // Scale factor for better quality (2x = 300 DPI equivalent)
 
       // Convertir chaque page
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         try {
-          const result = await convert(pageNum, { responseType: 'image' });
+          this.logger.log(`Processing page ${pageNum}/${numPages}...`);
           
-          this.logger.log(`Page ${pageNum} conversion result type: ${typeof result}, has path: ${!!result?.path}`);
+          // Obtenir la page
+          const page = await pdfDocument.getPage(pageNum);
+          const viewport = page.getViewport({ scale });
+
+          // Créer un canvas avec les dimensions de la page
+          const canvas = createCanvas(viewport.width, viewport.height);
+          const context = canvas.getContext('2d');
+
+          // Rendre la page sur le canvas
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport,
+          };
+
+          await page.render(renderContext).promise;
+
+          // Convertir le canvas en buffer PNG
+          const imageBuffer = canvas.toBuffer('image/png');
           
-          // pdf2pic retourne un objet avec path vers le fichier généré
-          if (result && result.path && fs.existsSync(result.path)) {
-            const rawBuffer = fs.readFileSync(result.path);
-            this.logger.log(`Page ${pageNum} raw file: ${rawBuffer.length} bytes`);
+          // Utiliser Sharp pour optimiser l'image si nécessaire
+          try {
+            const optimizedBuffer = await sharp(imageBuffer)
+              .png({ quality: 100, compressionLevel: 6 })
+              .resize(2000, 2000, {
+                fit: 'inside',
+                withoutEnlargement: true,
+              })
+              .toBuffer();
             
-            // Utiliser Sharp pour valider et retraiter l'image
-            try {
-              const validatedBuffer = await sharp(rawBuffer)
-                .png()
-                .toBuffer();
-              
-              images.push(validatedBuffer);
-              this.logger.log(`Page ${pageNum} validated with Sharp: ${validatedBuffer.length} bytes`);
-            } catch (sharpError) {
-              this.logger.error(`Sharp validation failed for page ${pageNum}: ${sharpError.message}`);
-              // Essayer quand même avec le buffer brut
-              if (rawBuffer && rawBuffer.length > 0) {
-                images.push(rawBuffer);
-                this.logger.warn(`Using raw buffer for page ${pageNum} despite Sharp error`);
-              }
-            }
-          } else {
-            // Fallback: chercher le fichier généré
-            const expectedPath = path.join(tempDir, `page.${pageNum}.png`);
-            this.logger.log(`Trying fallback path: ${expectedPath}`);
-            
-            if (fs.existsSync(expectedPath)) {
-              const rawBuffer = fs.readFileSync(expectedPath);
-              
-              try {
-                const validatedBuffer = await sharp(rawBuffer)
-                  .png()
-                  .toBuffer();
-                
-                images.push(validatedBuffer);
-                this.logger.log(`Page ${pageNum} validated (fallback): ${validatedBuffer.length} bytes`);
-              } catch (sharpError) {
-                this.logger.error(`Sharp validation failed (fallback) for page ${pageNum}: ${sharpError.message}`);
-              }
-            } else {
-              this.logger.warn(`Page ${pageNum}: Image file not found at ${expectedPath}`);
-            }
+            images.push(optimizedBuffer);
+            this.logger.log(`Page ${pageNum} converted: ${optimizedBuffer.length} bytes`);
+          } catch (sharpError) {
+            // Si Sharp échoue, utiliser le buffer direct
+            this.logger.warn(`Sharp optimization failed for page ${pageNum}, using raw buffer`);
+            images.push(imageBuffer);
           }
         } catch (error: any) {
           this.logger.error(`Failed to convert page ${pageNum}: ${error.message}`, error.stack);
+          // Continue avec les autres pages même si une échoue
         }
       }
 
-      // Nettoyer les fichiers temporaires
-      try {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      } catch (cleanupError) {
-        this.logger.warn(`Failed to cleanup temp directory: ${cleanupError.message}`);
-      }
-
       if (images.length === 0) {
-        throw new BadRequestException('Failed to extract any images from PDF');
+        throw new BadRequestException('Failed to extract any images from PDF. No pages could be converted.');
       }
 
+      this.logger.log(`Successfully converted ${images.length}/${numPages} pages to images`);
       return images;
     } catch (error: any) {
-      this.logger.error(`Error converting PDF to images: ${error.message}`);
+      this.logger.error(`Error converting PDF to images: ${error.message}`, error.stack);
       
       if (error.message.includes('Cannot find module') || error.code === 'MODULE_NOT_FOUND') {
         throw new BadRequestException(
-          'pdf2pic is required for PDF processing. Please install it: npm install pdf2pic pdf-lib. ' +
-          'Also ensure GraphicsMagick or ImageMagick is installed on your system.'
+          'PDF processing libraries are required. Please install: npm install pdfjs-dist canvas pdf-lib sharp'
         );
       }
       
       throw new BadRequestException(
-        `Failed to convert PDF to images: ${error.message}. ` +
-        'Make sure GraphicsMagick or ImageMagick is installed: brew install graphicsmagick (macOS) or sudo apt-get install graphicsmagick (Linux)'
+        `Failed to convert PDF to images: ${error.message}`
       );
     }
   }

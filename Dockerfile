@@ -1,6 +1,12 @@
 FROM node:18-alpine
 
-RUN apk add --no-cache graphicsmagick ghostscript
+# Install dependencies for canvas (node-canvas)
+RUN apk add --no-cache \
+    cairo \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev
 
 WORKDIR /usr/src/app
 

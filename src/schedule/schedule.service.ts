@@ -115,7 +115,8 @@ export class ScheduleService {
       this.logger.log(`PDF has ${numPages} pages`);
 
       const images: Buffer[] = [];
-      const scale = 2.0; // Scale factor for better quality (2x = 300 DPI equivalent)
+      // Higher scale for better OCR quality (4.0 = ~600 DPI, optimal for text recognition)
+      const scale = 4.0;
 
       // Convertir chaque page
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
@@ -130,6 +131,16 @@ export class ScheduleService {
           const canvas = createCanvas(viewport.width, viewport.height);
           const context = canvas.getContext('2d');
 
+          // Améliorer la qualité de rendu pour OCR
+          // Set white background for clean rendering
+          context.fillStyle = 'white';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Enable better text rendering
+          context.textRenderingOptimization = 'optimizeQuality';
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = 'high';
+
           // Rendre la page sur le canvas
           const renderContext = {
             canvasContext: context,
@@ -141,18 +152,22 @@ export class ScheduleService {
           // Convertir le canvas en buffer PNG
           const imageBuffer = canvas.toBuffer('image/png');
           
-          // Utiliser Sharp pour optimiser l'image si nécessaire
+          // Utiliser Sharp pour optimiser l'image pour OCR (keep color, better for complex layouts)
           try {
             const optimizedBuffer = await sharp(imageBuffer)
-              .png({ quality: 100, compressionLevel: 6 })
-              .resize(2000, 2000, {
-                fit: 'inside',
-                withoutEnlargement: true,
+              // Keep color - sometimes helps OCR with colored text/backgrounds
+              .ensureAlpha() // Ensure alpha channel
+              .normalize() // Enhance contrast
+              .sharpen(1.5, 1, 2) // Stronger sharpening for text (sigma, flat, jagged)
+              .png({ 
+                quality: 100, 
+                compressionLevel: 0, // No compression for maximum quality
+                adaptiveFiltering: true 
               })
               .toBuffer();
             
             images.push(optimizedBuffer);
-            this.logger.log(`Page ${pageNum} converted: ${optimizedBuffer.length} bytes`);
+            this.logger.log(`Page ${pageNum} converted and optimized: ${optimizedBuffer.length} bytes`);
           } catch (sharpError) {
             // Si Sharp échoue, utiliser le buffer direct
             this.logger.warn(`Sharp optimization failed for page ${pageNum}, using raw buffer`);
@@ -210,8 +225,20 @@ export class ScheduleService {
         },
       });
       
-      // Effectuer l'OCR sur le fichier temporaire
-      const { data: { text } } = await worker.recognize(tempImagePath);
+      // Configurer Tesseract pour meilleure reconnaissance
+      // PSM 6 = Assume a single uniform block of text (good for schedules)
+      // PSM 11 = Sparse text (if schedule has gaps)
+      // PSM 12 = Sparse text with OSD (Orientation and Script Detection)
+      await worker.setParameters({
+        tessedit_pageseg_mode: '6' as any, // Try uniform block first
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ :/-()[].,;!?',
+        preserve_interword_spaces: '1',
+      });
+      
+      // Effectuer l'OCR sur le fichier temporaire avec meilleure configuration
+      const { data: { text } } = await worker.recognize(tempImagePath, {
+        rectangle: undefined, // Process entire image
+      });
       
       // Terminer le worker
       await worker.terminate();

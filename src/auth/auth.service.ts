@@ -53,7 +53,10 @@ async googleLogin(idToken: string) {
     // Verify Google token
     const ticket = await this.googleClient.verifyIdToken({
       idToken: idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: [
+          process.env.GOOGLE_CLIENT_ID_ANDROID ?? '',
+          process.env.GOOGLE_CLIENT_ID_IOS ?? ''
+        ],
     });
     //console.log('✅ Google token verified');
 

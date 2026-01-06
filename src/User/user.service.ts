@@ -7,7 +7,6 @@ import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { ResetPasswordDto } from './dto/reset-password-dto';
 import { CreateProfileFromCvDto } from './dto/create-profile-from-cv.dto';
-import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 
 @Injectable()
 export class UserService {
@@ -273,6 +272,7 @@ export class UserService {
     return user.likedOffres.some((id) => id.toString() === offreId);
   }
 
+  // --------- PROFIL À PARTIR DU CV IA ----------
   async createOrUpdateProfileFromCv(
     userId: string,
     cv: CreateProfileFromCvDto,

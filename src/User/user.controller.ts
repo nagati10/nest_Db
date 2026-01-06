@@ -16,7 +16,6 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import { UserService } from './user.service';
-import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import {
   ApiBearerAuth,
@@ -31,13 +30,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import path from 'path';
 import type { UserDocument } from './schemas/user.schema';
-import * as fs from 'fs';
 import { ResetPasswordDto } from './dto/reset-password-dto';
 import { CreateProfileFromCvDto } from './dto/create-profile-from-cv.dto';
 
 @Controller('user/me')
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(private readonly userService: UserService) { }
 
   @Get()
   @ApiBearerAuth()

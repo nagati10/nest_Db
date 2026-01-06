@@ -7,8 +7,9 @@ import * as os from 'os';
 import { EvenementService } from '../evenement/evenement.service';
 import { EventType } from '../evenement/schemas/evenement.schema';
 import { EvenementDocument } from '../evenement/schemas/evenement.schema';
-import { createWorker } from 'tesseract.js';
+import { HfInference } from '@huggingface/inference';
 import sharp from 'sharp';
+import { createWorker } from 'tesseract.js';
 
 export interface Course {
   day: string;
@@ -25,8 +26,8 @@ export interface ProcessedSchedule {
 @Injectable()
 export class ScheduleService {
   private readonly logger = new Logger(ScheduleService.name);
-  // Tesseract.js pour OCR local (pas besoin de HF_API_KEY)
-  private useTesseract = true;
+  private hf: HfInference | null = null;
+  private readonly OCR_MODEL = 'microsoft/trocr-small-printed';
 
   // Mapping des jours en français vers anglais
   private readonly dayMapping: { [key: string]: string } = {
@@ -48,11 +49,103 @@ export class ScheduleService {
     private readonly configService: ConfigService,
     private readonly evenementService: EvenementService,
   ) {
-    this.logger.log('ScheduleService initialized with Tesseract.js OCR');
+    this.initializeHuggingFace();
+  }
+
+  private initializeHuggingFace(): void {
+    const hfApiKey = this.configService.get<string>('HF_API_KEY');
+    
+    if (!hfApiKey) {
+      this.logger.warn('HF_API_KEY non définie - L\'OCR utilisera uniquement Tesseract.js (local)');
+      this.logger.warn('Pour utiliser Hugging Face OCR en fallback, obtenez une clé sur: https://huggingface.co/settings/tokens');
+      this.hf = null;
+      return;
+    }
+
+    try {
+      this.hf = new HfInference(hfApiKey);
+      this.logger.log(`✅ Hugging Face initialisé (sera utilisé en fallback si Tesseract échoue)`);
+    } catch (error) {
+      this.logger.warn(`⚠️ Erreur lors de l'initialisation de Hugging Face: ${error.message}`);
+      this.logger.warn('L\'OCR utilisera uniquement Tesseract.js (local)');
+      this.hf = null;
+    }
   }
 
   /**
-   * Traite un PDF d'emploi du temps complet
+   * Traite une image d'emploi du temps directement
+   */
+  async processScheduleImage(imageBuffer: Buffer): Promise<ProcessedSchedule> {
+    try {
+      this.logger.log('Starting image processing...');
+
+      // 1. Valider et optimiser l'image avec Sharp
+      let processedImage: Buffer;
+      try {
+        processedImage = await sharp(imageBuffer)
+          .png() // Convertir en PNG pour une meilleure qualité OCR
+          .toBuffer();
+        this.logger.log(`Image processed and converted to PNG: ${processedImage.length} bytes`);
+      } catch (sharpError) {
+        this.logger.warn(`Sharp processing failed, using original buffer: ${sharpError.message}`);
+        processedImage = imageBuffer; // Utiliser le buffer original si Sharp échoue
+      }
+
+      // 2. Traiter l'image avec OCR (Tesseract.js par défaut, Hugging Face en fallback si disponible)
+      let text: string;
+      
+      try {
+        // Essayer d'abord Tesseract.js (solution locale, fiable)
+        this.logger.log('Processing image with Tesseract.js OCR...');
+        text = await this.callTesseractOCR(processedImage);
+        this.logger.log('✅ Tesseract.js OCR completed successfully');
+      } catch (tesseractError) {
+        this.logger.warn(`Tesseract.js OCR failed: ${tesseractError.message}`);
+        
+        // Fallback vers Hugging Face si disponible
+        if (this.hf) {
+          try {
+            this.logger.log('Trying Hugging Face OCR as fallback...');
+            text = await this.callHuggingFaceOCR(processedImage);
+            this.logger.log('✅ Hugging Face OCR completed successfully');
+          } catch (hfError) {
+            this.logger.error(`Both OCR methods failed. Tesseract: ${tesseractError.message}, Hugging Face: ${hfError.message}`);
+            throw new BadRequestException(
+              `OCR failed with both methods. Tesseract error: ${tesseractError.message}. ` +
+              `Please ensure the image is clear and contains readable text.`
+            );
+          }
+        } else {
+          // Si Hugging Face n'est pas disponible, relancer l'erreur Tesseract
+          throw new BadRequestException(
+            `OCR failed: ${tesseractError.message}. Please ensure the image is clear and contains readable text.`
+          );
+        }
+      }
+
+      this.logger.log('OCR completed, parsing text...');
+      
+      // Log le texte complet pour debug
+      this.logger.debug(`Full OCR text:\n${text}`);
+
+      // 3. Parser le texte en JSON structuré
+      const courses = this.parseScheduleTextToJSON(text);
+
+      this.logger.log(`Parsed ${courses.length} courses`);
+      
+      if (courses.length === 0) {
+        this.logger.warn('No courses found in OCR text. The parsing algorithm may need adjustment for this schedule format.');
+      }
+
+      return { courses };
+    } catch (error) {
+      this.logger.error(`Error processing image: ${error.message}`, error.stack);
+      throw new BadRequestException(`Failed to process image: ${error.message}`);
+    }
+  }
+
+  /**
+   * Traite un PDF d'emploi du temps complet (méthode conservée pour rétrocompatibilité)
    */
   async processSchedulePDF(pdfBuffer: Buffer): Promise<ProcessedSchedule> {
     try {
@@ -62,11 +155,30 @@ export class ScheduleService {
       const images = await this.convertPdfToImages(pdfBuffer);
       this.logger.log(`PDF converted to ${images.length} images`);
 
-      // 2. Traiter chaque image avec OCR
+      // 2. Traiter chaque image avec OCR (Tesseract.js par défaut)
       let allText = '';
       for (let i = 0; i < images.length; i++) {
-        this.logger.log(`Processing page ${i + 1}/${images.length}...`);
-        const text = await this.callTesseractOCR(images[i]);
+        this.logger.log(`Processing page ${i + 1}/${images.length} with OCR...`);
+        let text: string;
+        
+        try {
+          // Utiliser Tesseract.js par défaut
+          text = await this.callTesseractOCR(images[i]);
+        } catch (tesseractError) {
+          // Fallback vers Hugging Face si disponible
+          if (this.hf) {
+            try {
+              this.logger.log(`Tesseract failed for page ${i + 1}, trying Hugging Face...`);
+              text = await this.callHuggingFaceOCR(images[i]);
+            } catch (hfError) {
+              this.logger.error(`Both OCR methods failed for page ${i + 1}`);
+              throw new BadRequestException(`OCR failed for page ${i + 1}: ${tesseractError.message}`);
+            }
+          } else {
+            throw new BadRequestException(`OCR failed for page ${i + 1}: ${tesseractError.message}`);
+          }
+        }
+        
         allText += text + '\n';
       }
 
@@ -93,110 +205,191 @@ export class ScheduleService {
 
   /**
    * Convertit un PDF en tableau d'images (buffers)
-   * Utilise pdfjs-dist et canvas (pure JavaScript, pas besoin de GraphicsMagick)
    */
   async convertPdfToImages(pdfBuffer: Buffer): Promise<Buffer[]> {
     try {
-      this.logger.log('Converting PDF to images using pdfjs-dist...');
+      // Créer un fichier temporaire pour le PDF
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-process-'));
+      const tempPdfPath = path.join(tempDir, 'input.pdf');
       
-      // Importer pdfjs-dist v3.x (better Node.js support)
-      // v3.x has reliable legacy build path
-      const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
-      const { createCanvas } = require('canvas');
+      fs.writeFileSync(tempPdfPath, pdfBuffer);
 
-      // Charger le document PDF
-      const loadingTask = pdfjsLib.getDocument({ 
-        data: new Uint8Array(pdfBuffer),
-        useSystemFonts: true,
+      // Utiliser pdf-poppler pour convertir le PDF en images
+      const pdf2pic = require('pdf2pic');
+      
+      const convert = pdf2pic.fromPath(tempPdfPath, {
+        density: 300, // DPI élevé pour meilleure qualité OCR
+        saveFilename: 'page',
+        savePath: tempDir,
+        format: 'png',
+        width: 2000,
+        height: 2000,
       });
-      const pdfDocument = await loadingTask.promise;
-      const numPages = pdfDocument.numPages;
 
-      this.logger.log(`PDF has ${numPages} pages`);
+      // Lire le nombre de pages du PDF
+      const PDFDocument = require('pdf-lib').PDFDocument;
+      const pdfDoc = await PDFDocument.load(pdfBuffer);
+      const numPages = pdfDoc.getPageCount();
 
       const images: Buffer[] = [];
-      // Balanced scale for OCR quality and performance (3.5 = ~525 DPI, good balance)
-      const scale = 3.5;
 
       // Convertir chaque page
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         try {
-          this.logger.log(`Processing page ${pageNum}/${numPages}...`);
+          const result = await convert(pageNum, { responseType: 'image' });
           
-          // Obtenir la page
-          const page = await pdfDocument.getPage(pageNum);
-          const viewport = page.getViewport({ scale });
-
-          // Créer un canvas avec les dimensions de la page
-          const canvas = createCanvas(viewport.width, viewport.height);
-          const context = canvas.getContext('2d');
-
-          // Améliorer la qualité de rendu pour OCR
-          // Set white background for clean rendering
-          context.fillStyle = 'white';
-          context.fillRect(0, 0, canvas.width, canvas.height);
-
-          // Enable better text rendering
-          context.textRenderingOptimization = 'optimizeQuality';
-          context.imageSmoothingEnabled = true;
-          context.imageSmoothingQuality = 'high';
-
-          // Rendre la page sur le canvas
-          const renderContext = {
-            canvasContext: context,
-            viewport: viewport,
-          };
-
-          await page.render(renderContext).promise;
-
-          // Convertir le canvas en buffer PNG
-          const imageBuffer = canvas.toBuffer('image/png');
+          this.logger.log(`Page ${pageNum} conversion result type: ${typeof result}, has path: ${!!result?.path}`);
           
-          // Utiliser Sharp pour optimiser l'image pour OCR (optimized for speed)
-          try {
-            const optimizedBuffer = await sharp(imageBuffer)
-              // Keep color - sometimes helps OCR with colored text/backgrounds
-              .ensureAlpha() // Ensure alpha channel
-              .normalize() // Enhance contrast
-              .sharpen(1.2, 1, 1.5) // Moderate sharpening (faster than heavy sharpening)
-              .png({ 
-                quality: 95, // Slightly lower quality for faster processing
-                compressionLevel: 3, // Moderate compression for speed
-                adaptiveFiltering: false // Disable for speed
-              })
-              .toBuffer();
+          // pdf2pic retourne un objet avec path vers le fichier généré
+          if (result && result.path && fs.existsSync(result.path)) {
+            const rawBuffer = fs.readFileSync(result.path);
+            this.logger.log(`Page ${pageNum} raw file: ${rawBuffer.length} bytes`);
             
-            images.push(optimizedBuffer);
-            this.logger.log(`Page ${pageNum} converted and optimized: ${optimizedBuffer.length} bytes`);
-          } catch (sharpError) {
-            // Si Sharp échoue, utiliser le buffer direct
-            this.logger.warn(`Sharp optimization failed for page ${pageNum}, using raw buffer`);
-            images.push(imageBuffer);
+            // Utiliser Sharp pour valider et retraiter l'image
+            try {
+              const validatedBuffer = await sharp(rawBuffer)
+                .png()
+                .toBuffer();
+              
+              images.push(validatedBuffer);
+              this.logger.log(`Page ${pageNum} validated with Sharp: ${validatedBuffer.length} bytes`);
+            } catch (sharpError) {
+              this.logger.error(`Sharp validation failed for page ${pageNum}: ${sharpError.message}`);
+              // Essayer quand même avec le buffer brut
+              if (rawBuffer && rawBuffer.length > 0) {
+                images.push(rawBuffer);
+                this.logger.warn(`Using raw buffer for page ${pageNum} despite Sharp error`);
+              }
+            }
+          } else {
+            // Fallback: chercher le fichier généré
+            const expectedPath = path.join(tempDir, `page.${pageNum}.png`);
+            this.logger.log(`Trying fallback path: ${expectedPath}`);
+            
+            if (fs.existsSync(expectedPath)) {
+              const rawBuffer = fs.readFileSync(expectedPath);
+              
+              try {
+                const validatedBuffer = await sharp(rawBuffer)
+                  .png()
+                  .toBuffer();
+                
+                images.push(validatedBuffer);
+                this.logger.log(`Page ${pageNum} validated (fallback): ${validatedBuffer.length} bytes`);
+              } catch (sharpError) {
+                this.logger.error(`Sharp validation failed (fallback) for page ${pageNum}: ${sharpError.message}`);
+              }
+            } else {
+              this.logger.warn(`Page ${pageNum}: Image file not found at ${expectedPath}`);
+            }
           }
         } catch (error: any) {
           this.logger.error(`Failed to convert page ${pageNum}: ${error.message}`, error.stack);
-          // Continue avec les autres pages même si une échoue
         }
       }
 
-      if (images.length === 0) {
-        throw new BadRequestException('Failed to extract any images from PDF. No pages could be converted.');
+      // Nettoyer les fichiers temporaires
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        this.logger.warn(`Failed to cleanup temp directory: ${cleanupError.message}`);
       }
 
-      this.logger.log(`Successfully converted ${images.length}/${numPages} pages to images`);
+      if (images.length === 0) {
+        throw new BadRequestException('Failed to extract any images from PDF');
+      }
+
       return images;
     } catch (error: any) {
-      this.logger.error(`Error converting PDF to images: ${error.message}`, error.stack);
+      this.logger.error(`Error converting PDF to images: ${error.message}`);
       
       if (error.message.includes('Cannot find module') || error.code === 'MODULE_NOT_FOUND') {
         throw new BadRequestException(
-          'PDF processing libraries are required. Please install: npm install pdfjs-dist@^3.11.174 canvas pdf-lib sharp'
+          'pdf2pic is required for PDF processing. Please install it: npm install pdf2pic pdf-lib. ' +
+          'Also ensure GraphicsMagick or ImageMagick is installed on your system.'
         );
       }
       
       throw new BadRequestException(
-        `Failed to convert PDF to images: ${error.message}`
+        `Failed to convert PDF to images: ${error.message}. ` +
+        'Make sure GraphicsMagick or ImageMagick is installed: brew install graphicsmagick (macOS) or sudo apt-get install graphicsmagick (Linux)'
       );
+    }
+  }
+
+  /**
+   * Appelle Hugging Face OCR pour extraire le texte d'une image (fallback uniquement)
+   * Note: Le modèle microsoft/trocr-small-printed n'est pas disponible via l'API Inference.
+   * Cette méthode est conservée pour compatibilité mais utilise Tesseract.js par défaut.
+   */
+  async callHuggingFaceOCR(imageBuffer: Buffer): Promise<string> {
+    try {
+      if (!this.hf) {
+        throw new BadRequestException('Hugging Face OCR not initialized. Check HF_API_KEY in environment variables.');
+      }
+
+      this.logger.log(`Calling Hugging Face OCR with model ${this.OCR_MODEL}...`);
+
+      // Convertir le Buffer en ArrayBuffer pour l'API Hugging Face
+      // Créer un nouveau ArrayBuffer pour éviter les problèmes de type
+      const arrayBuffer = new ArrayBuffer(imageBuffer.length);
+      const view = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < imageBuffer.length; i++) {
+        view[i] = imageBuffer[i];
+      }
+
+      // Appeler l'API Hugging Face pour l'OCR
+      // Note: Le modèle microsoft/trocr-small-printed n'est pas disponible via l'API Inference
+      // On essaie quand même au cas où un autre modèle serait configuré
+      const result = await this.hf.imageToText({
+        model: this.OCR_MODEL,
+        data: arrayBuffer as ArrayBuffer,
+      });
+
+      // Le résultat de imageToText est une chaîne de caractères directement
+      let extractedText: string;
+      if (typeof result === 'string') {
+        extractedText = result;
+      } else if (result && typeof result === 'object' && 'text' in result) {
+        extractedText = (result as any).text;
+      } else {
+        // Essayer de parser le résultat
+        extractedText = JSON.stringify(result);
+      }
+
+      if (!extractedText || extractedText.trim().length === 0) {
+        throw new BadRequestException('OCR returned empty result. The image may be too blurry or contain no text.');
+      }
+
+      extractedText = extractedText.trim();
+      this.logger.log(`Hugging Face OCR extracted ${extractedText.length} characters`);
+      
+      // Log les 500 premiers caractères pour debug
+      if (extractedText.length > 0) {
+        this.logger.debug(`OCR text preview: ${extractedText.substring(0, Math.min(500, extractedText.length))}...`);
+      }
+
+      return extractedText;
+    } catch (error: any) {
+      this.logger.error(`Hugging Face OCR error: ${error.message}`, error.stack);
+      
+      // Si le modèle n'est pas disponible, indiquer clairement l'erreur
+      if (error.message?.includes('No Inference Provider') || error.message?.includes('not available')) {
+        throw new BadRequestException(
+          `Le modèle ${this.OCR_MODEL} n'est pas disponible via l'API Inference de Hugging Face. ` +
+          `Utilisez Tesseract.js (déjà configuré) qui fonctionne localement.`
+        );
+      }
+      
+      if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+        throw new BadRequestException('Invalid or missing HF_API_KEY. Please check your environment variables.');
+      }
+      
+      if (error.message?.includes('429') || error.message?.includes('rate limit')) {
+        throw new BadRequestException('Hugging Face API rate limit exceeded. Please try again later.');
+      }
+      
+      throw new BadRequestException(`OCR failed: ${error.message}`);
     }
   }
 
@@ -205,7 +398,6 @@ export class ScheduleService {
    */
   async callTesseractOCR(imageBuffer: Buffer): Promise<string> {
     let tempImagePath: string | null = null;
-    const startTime = Date.now();
     
     try {
       this.logger.log('Starting Tesseract OCR...');
@@ -217,50 +409,17 @@ export class ScheduleService {
       // Sauvegarder le buffer dans un fichier temporaire
       fs.writeFileSync(tempImagePath, imageBuffer);
       
-      // Créer un worker Tesseract avec support français et anglais (optimized for speed)
+      // Créer un worker Tesseract avec support français et anglais
       const worker = await createWorker('fra+eng', 1, {
         logger: (m) => {
           if (m.status === 'recognizing text') {
             this.logger.debug(`OCR progress: ${Math.round(m.progress * 100)}%`);
           }
         },
-        cachePath: path.join(os.tmpdir(), 'tesseract-cache'), // Cache for faster subsequent runs
       });
       
-      // Configurer Tesseract pour meilleure reconnaissance de tableaux (optimized)
-      await worker.setParameters({
-        tessedit_pageseg_mode: '4' as any, // Better for table/grid formats
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ :/-()[].,;!?',
-        preserve_interword_spaces: '1',
-        tessedit_ocr_engine_mode: '1', // Use LSTM OCR engine
-        // Performance optimizations
-        classify_bln_numeric_mode: '0', // Disable numeric mode for speed
-        textord_min_linesize: '2.5', // Optimize line detection
-      });
-      
-      // Effectuer l'OCR avec timeout protection (45 seconds max per page)
-      let text: string;
-      try {
-        const ocrPromise = worker.recognize(tempImagePath, {
-          rectangle: undefined, // Process entire image
-        });
-        
-        // Add timeout protection
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('OCR timeout after 45 seconds')), 45000);
-        });
-        
-        const result = await Promise.race([ocrPromise, timeoutPromise]);
-        text = result.data.text;
-      } catch (error: any) {
-        // Ensure worker is terminated even on timeout/error
-        try {
-          await worker.terminate();
-        } catch (e) {
-          // Ignore termination errors
-        }
-        throw error;
-      }
+      // Effectuer l'OCR sur le fichier temporaire
+      const { data: { text } } = await worker.recognize(tempImagePath);
       
       // Terminer le worker
       await worker.terminate();
@@ -279,7 +438,7 @@ export class ScheduleService {
         throw new BadRequestException('OCR returned empty result');
       }
       
-      this.logger.log(`Tesseract OCR extracted ${text.length} characters in ${Date.now() - startTime}ms`);
+      this.logger.log(`Tesseract OCR extracted ${text.length} characters`);
       // Log les 500 premiers caractères pour debug
       if (text.length > 0) {
         this.logger.debug(`OCR text preview: ${text.substring(0, Math.min(500, text.length))}...`);
@@ -303,14 +462,7 @@ export class ScheduleService {
    * Parse le texte OCR en JSON structuré
    */
   parseScheduleTextToJSON(text: string): Course[] {
-    // D'abord essayer le parser pour format grid/tableau (format ESPRIT standard)
-    const gridCourses = this.parseGridSchedule(text);
-    if (gridCourses.length > 0) {
-      this.logger.log(`Grid parser found ${gridCourses.length} courses`);
-      return gridCourses;
-    }
-    
-    // Ensuite essayer le parser spécifique ESPRIT (format texte)
+    // D'abord essayer le parser spécifique ESPRIT
     const espritCourses = this.parseESPRITSchedule(text);
     if (espritCourses.length > 0) {
       return espritCourses;
@@ -631,186 +783,8 @@ export class ScheduleService {
   }
 
   /**
-   * Parser pour format grid/tableau (jours en colonnes, heures en lignes)
-   * Format: ESPRIT grid timetable
-   */
-  private parseGridSchedule(text: string): Course[] {
-    const courses: Course[] = [];
-    const cleanedText = this.cleanOCRText(text);
-    const lines = cleanedText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    
-    // Pattern pour détecter les cours dans le format grid
-    // Ex: "COMMUNICATION, CULTURE AND CITIZENSHIP F1" avec "09:00 - 12:15" et "A12"
-    // Ou: "PROCEDURAL PROGRAMMING 1" avec horaires et salle
-    
-    // Chercher les patterns de cours avec horaires
-    // Format 1: "COURSE NAME" suivi de "HH:MM - HH:MM" et "A12" ou similaire
-    const coursePattern = /([A-Z][A-Z\s,()&'-]+?)\s+(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})\s+([A-Z]\d{2,3}|En\s+Ligne)/gi;
-    
-    // Chercher aussi sans salle explicite
-    const coursePatternNoRoom = /([A-Z][A-Z\s,()&'-]{10,}?)\s+(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/gi;
-    
-    let currentDay: string | null = null;
-    let lastDayIndex = -1;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // Détecter un jour (peut être dans une ligne de header)
-      const dayMatch = this.detectDay(line);
-      if (dayMatch) {
-        currentDay = dayMatch;
-        lastDayIndex = i;
-        this.logger.debug(`📅 Grid: Day found: ${currentDay} at line ${i}`);
-        continue;
-      }
-      
-      // Si on a un jour, chercher les cours dans les lignes suivantes
-      if (currentDay && i > lastDayIndex) {
-        // Chercher pattern avec salle
-        let match;
-        while ((match = coursePattern.exec(line)) !== null) {
-          const subject = match[1].trim();
-          const startHour = match[2].padStart(2, '0');
-          const startMin = match[3];
-          const endHour = match[4].padStart(2, '0');
-          const endMin = match[5];
-          const classroom = match[6];
-          
-          if (subject.length > 5) {
-            courses.push({
-              day: currentDay,
-              start: `${startHour}:${startMin}`,
-              end: `${endHour}:${endMin}`,
-              subject: this.cleanOCRText(subject),
-              classroom: classroom,
-            });
-            this.logger.debug(`✅ Grid: Found course: ${subject} on ${currentDay} at ${startHour}:${startMin}`);
-          }
-        }
-        
-        // Réinitialiser le regex
-        coursePattern.lastIndex = 0;
-        
-        // Chercher pattern sans salle
-        while ((match = coursePatternNoRoom.exec(line)) !== null) {
-          const subject = match[1].trim();
-          const startHour = match[2].padStart(2, '0');
-          const startMin = match[3];
-          const endHour = match[4].padStart(2, '0');
-          const endMin = match[5];
-          
-          if (subject.length > 5) {
-            // Chercher salle dans les lignes autour
-            let classroom: string | undefined;
-            for (let j = Math.max(0, i - 2); j < Math.min(i + 3, lines.length); j++) {
-              const nearLine = lines[j];
-              const roomMatch = nearLine.match(/\b([A-Z]\d{2,3}|En\s+Ligne)\b/i);
-              if (roomMatch) {
-                classroom = roomMatch[1];
-                break;
-              }
-            }
-            
-            courses.push({
-              day: currentDay,
-              start: `${startHour}:${startMin}`,
-              end: `${endHour}:${endMin}`,
-              subject: this.cleanOCRText(subject),
-              classroom: classroom,
-            });
-            this.logger.debug(`✅ Grid: Found course (no room): ${subject} on ${currentDay} at ${startHour}:${startMin}`);
-          }
-        }
-        
-        coursePatternNoRoom.lastIndex = 0;
-      }
-    }
-    
-    // Si pas de cours trouvés avec le pattern grid, essayer une approche plus flexible
-    if (courses.length === 0) {
-      return this.parseGridScheduleFlexible(cleanedText);
-    }
-    
-    return courses;
-  }
-  
-  /**
-   * Parser flexible pour grid - cherche les cours même si le format est moins structuré
-   */
-  private parseGridScheduleFlexible(text: string): Course[] {
-    const courses: Course[] = [];
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    
-    let currentDay: string | null = null;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // Détecter jour
-      const dayMatch = this.detectDay(line);
-      if (dayMatch) {
-        currentDay = dayMatch;
-        continue;
-      }
-      
-      if (!currentDay) continue;
-      
-      // Chercher noms de cours en majuscules (format ESPRIT)
-      // Ex: "COMMUNICATION, CULTURE AND CITIZENSHIP F1"
-      const uppercaseCourseMatch = line.match(/^([A-Z][A-Z\s,()&'-]{15,})/);
-      if (uppercaseCourseMatch) {
-        const subject = uppercaseCourseMatch[1].trim();
-        
-        // Chercher horaires dans la même ligne ou lignes suivantes
-        let startTime: string | null = null;
-        let endTime: string | null = null;
-        let classroom: string | undefined;
-        
-        // Chercher dans la ligne actuelle
-        const timeMatch = line.match(/(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/);
-        if (timeMatch) {
-          startTime = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`;
-          endTime = `${timeMatch[3].padStart(2, '0')}:${timeMatch[4]}`;
-        }
-        
-        // Chercher salle
-        const roomMatch = line.match(/\b([A-Z]\d{2,3}|En\s+Ligne)\b/i);
-        if (roomMatch) {
-          classroom = roomMatch[1];
-        }
-        
-        // Si pas trouvé, chercher dans les 2 lignes suivantes
-        if (!startTime) {
-          for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-            const nextLine = lines[j];
-            const nextTimeMatch = nextLine.match(/(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/);
-            if (nextTimeMatch) {
-              startTime = `${nextTimeMatch[1].padStart(2, '0')}:${nextTimeMatch[2]}`;
-              endTime = `${nextTimeMatch[3].padStart(2, '0')}:${nextTimeMatch[4]}`;
-              break;
-            }
-          }
-        }
-        
-        if (startTime && endTime && subject.length > 10) {
-          courses.push({
-            day: currentDay,
-            start: startTime,
-            end: endTime,
-            subject: this.cleanOCRText(subject),
-            classroom: classroom,
-          });
-          this.logger.debug(`✅ Grid Flexible: Found course: ${subject} on ${currentDay}`);
-        }
-      }
-    }
-    
-    return courses;
-  }
-
-  /**
    * Parser spécifique pour le format ESPRIT (tableau avec horaires en colonnes)
+   * Amélioré pour gérer le format tabulaire avec colonnes par jour
    */
   private parseESPRITSchedule(text: string): Course[] {
     const courses: Course[] = [];
@@ -818,393 +792,693 @@ export class ScheduleService {
     const cleanedText = this.cleanOCRText(text);
     const lines = cleanedText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     
-    let currentDay: string | null = null;
-    const processedLines = new Set<number>(); // Pour éviter les doublons
+    // Trouver la ligne avec les jours de la semaine
+    let daysLineIndex = -1;
+    const daysOrder: string[] = [];
+    const dayPositions: Map<string, number> = new Map();
     
     for (let i = 0; i < lines.length; i++) {
-      if (processedLines.has(i)) continue;
+      const line = lines[i].toLowerCase();
+      // Chercher une ligne contenant plusieurs jours
+      const foundDays: string[] = [];
+      for (const [frenchDay, englishDay] of Object.entries(this.dayMapping)) {
+        if (line.includes(frenchDay)) {
+          foundDays.push(englishDay);
+          // Estimer la position du jour dans la ligne originale
+          const pos = lines[i].toLowerCase().indexOf(frenchDay);
+          if (pos !== -1) {
+            dayPositions.set(englishDay, pos);
+          }
+        }
+      }
       
+      if (foundDays.length >= 3) {
+        // C'est probablement la ligne des jours
+        daysLineIndex = i;
+        daysOrder.push(...foundDays);
+        this.logger.debug(`📅 Found days line at index ${i}: ${foundDays.join(', ')}`);
+        break;
+      }
+    }
+    
+    if (daysLineIndex === -1 || daysOrder.length === 0) {
+      this.logger.warn('Could not find days line, using fallback parser');
+      return this.parseESPRITScheduleFallback(cleanedText, lines);
+    }
+    
+    // Nouvelle approche : trouver les lignes avec plusieurs horaires identiques (format tabulaire)
+    // Ces lignes représentent le même créneau horaire pour différents jours
+    const timePattern = /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/g;
+    
+    // Parcourir les lignes pour trouver celles avec plusieurs horaires
+    for (let i = daysLineIndex + 1; i < lines.length; i++) {
       const line = lines[i];
       
-      // Détecter les jours (Lundi, Mardi, etc.)
-      const dayMatch = this.detectDay(line);
-      if (dayMatch) {
-        currentDay = dayMatch;
-        this.logger.debug(`📅 Day found: ${currentDay} from line: "${line}"`);
+      // Chercher tous les horaires dans cette ligne
+      const timeMatches: Array<{ start: string; end: string; index: number }> = [];
+      let match;
+      while ((match = timePattern.exec(line)) !== null) {
+        timeMatches.push({
+          start: `${match[1].padStart(2, '0')}:${match[2]}`,
+          end: `${match[3].padStart(2, '0')}:${match[4]}`,
+          index: match.index,
+        });
+      }
+      
+      // Si on trouve plusieurs horaires identiques sur la même ligne, c'est un créneau horaire pour plusieurs jours
+      if (timeMatches.length >= 2) {
+        // Vérifier que tous les horaires sont identiques (même créneau)
+        const firstTime = `${timeMatches[0].start}-${timeMatches[0].end}`;
+        const allSame = timeMatches.every(t => `${t.start}-${t.end}` === firstTime);
         
-        // NOUVEAU: Chercher un cours DANS LA MÊME LIGNE après le jour
-        // Ex: "Lundi En Ligne" ou "Mardi A13/ Electronique!"
-        // Trouver la position du jour dans la ligne originale (peu importe la casse)
-        const lowerLine = line.toLowerCase();
-        let dayPosition = -1;
-        let dayLength = 0;
-        
-        // Chercher le jour français
-        for (const [frenchDay, englishDay] of Object.entries(this.dayMapping)) {
-          if (englishDay === currentDay) {
-            const pos = lowerLine.indexOf(frenchDay);
-            if (pos !== -1) {
-              dayPosition = pos;
-              dayLength = frenchDay.length;
-              break;
+        if (allSame) {
+          // C'est un créneau horaire qui se répète pour plusieurs jours
+          const timeSlot = { start: timeMatches[0].start, end: timeMatches[0].end };
+          
+          // Chercher les noms de cours dans les lignes précédentes (2-6 lignes avant)
+          // Les cours sont généralement sur des lignes séparées au-dessus des horaires
+          const courseLines: Array<{ line: string; index: number }> = [];
+          for (let j = Math.max(daysLineIndex + 1, i - 6); j < i; j++) {
+            const prevLine = lines[j].trim();
+            // Ignorer les lignes avec horaires, jours, dates, heures (09h, 10h), salles seules
+            if (!prevLine.match(/\d{1,2}:\d{2}/) && 
+                !this.detectDay(prevLine) && 
+                !prevLine.match(/^\d{2}\/\d{2}\/\d{4}/) &&
+                !prevLine.match(/^\d{1,2}h$/i) &&
+                !prevLine.match(/^[—-]+$/) &&
+                !prevLine.match(/^[A-Z]\d{2,3}$/) &&
+                prevLine.length > 3 &&
+                prevLine.match(/[A-Za-z]{3,}/)) {
+              courseLines.push({ line: prevLine, index: j });
             }
           }
-        }
-        
-        // Si pas trouvé en français, chercher en anglais
-        if (dayPosition === -1) {
-          const pos = lowerLine.indexOf(currentDay.toLowerCase());
-          if (pos !== -1) {
-            dayPosition = pos;
-            dayLength = currentDay.length;
-          }
-        }
-        
-        if (dayPosition !== -1) {
-          const lineAfterDay = line.substring(dayPosition + dayLength).trim();
-          this.logger.debug(`📝 Text after day: "${lineAfterDay}"`);
           
-          if (lineAfterDay.length > 0) {
-            // Chercher cours avec horaire dans la même ligne
-            const sameLineMatch = lineAfterDay.match(/(.+?)\s+(\d{1,2})H:(\d{2})\s*-\s*(\d{1,2})H:(\d{2})/);
-            if (sameLineMatch) {
-              let subject = sameLineMatch[1].trim()
-                .replace(/\/$/, '')
-                .replace(/^[;\s.]+/, '')
-                .replace(/[;\s.]+$/, '')
-                .trim();
+          // Extraire les noms de cours depuis ces lignes
+          const courseNames: string[] = [];
+          
+          // Si on a plusieurs lignes, elles peuvent contenir plusieurs cours ou un cours multi-lignes
+          if (courseLines.length > 0) {
+            // Analyser chaque ligne pour extraire les cours
+            for (const courseLine of courseLines) {
+              const line = courseLine.line;
               
-              if (subject.length >= 5) {
-                const startHour = sameLineMatch[2].padStart(2, '0');
-                const startMin = sameLineMatch[3];
-                const endHour = sameLineMatch[4].padStart(2, '0');
-                const endMin = sameLineMatch[5];
+              // Si la ligne contient plusieurs mots en majuscules séparés par des espaces
+              // (ex: "EN PE PROCEDURAL PROGRAMMING 1 ALGORITHMIC 1 PHOTO AND VIDEO EDITING")
+              // Essayer de les séparer en cours individuels
+              
+              // Pattern amélioré : Chercher des séquences de mots en majuscules
+              // Ex: "PROCEDURAL PROGRAMMING 1", "ALGORITHMIC 1", "PHOTO AND VIDEO EDITING"
+              // Les cours sont généralement séparés par des espaces et commencent par des majuscules
+              
+              // Essayer de séparer par des patterns spécifiques
+              // Pattern 1: Mots en majuscules suivis de "1" ou "F1" ou similaires
+              // Pattern 2: Séquences de 2+ mots en majuscules
+              
+              // Séparer d'abord par des patterns comme "1 " suivi d'un nouveau mot en majuscules
+              // ou par des séquences de mots en majuscules séparées par des espaces
+              const parts = line.split(/\s+(?=[A-Z]{3,}\s+[A-Z])/); // Séparer avant un mot en majuscules suivi d'un autre
+              
+              // Si ça ne fonctionne pas, essayer une autre approche
+              if (parts.length <= 1) {
+                // Chercher des patterns comme "WORD WORD 1" ou "WORD WORD WORD"
+                const coursePattern = /([A-Z][A-Z\s,&]+?(?:\s+\d+)?(?:\s+[A-Z]{2,})?)/g;
+                let match;
+                const foundCourses: string[] = [];
                 
-                // Chercher salle
-                const classroomMatch = lineAfterDay.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
+                while ((match = coursePattern.exec(line)) !== null) {
+                  const course = match[1].trim();
+                  // Filtrer les cours valides
+                  if (course.length >= 5 && 
+                      !course.match(/^[A-Z]{1,2}$/) &&
+                      !course.match(/^[A-Z]\d{2,3}$/) &&
+                      course.split(/\s+/).length >= 2) { // Au moins 2 mots
+                    foundCourses.push(course);
+                  }
+                }
                 
-                courses.push({
-                  day: currentDay,
-                  start: `${startHour}:${startMin}`,
-                  end: `${endHour}:${endMin}`,
-                  subject: this.cleanOCRText(subject),
-                  classroom: classroomMatch ? classroomMatch[1] : undefined,
-                });
-                this.logger.debug(`✅ Found course inline with day: ${subject} on ${currentDay}`);
-                processedLines.add(i);
+                if (foundCourses.length > 1) {
+                  // Plusieurs cours trouvés
+                  courseNames.push(...foundCourses);
+                } else if (foundCourses.length === 1) {
+                  // Un seul cours trouvé, mais la ligne peut en contenir plusieurs
+                  // Essayer de séparer manuellement
+                  const words = line.split(/\s+/);
+                  const courses: string[] = [];
+                  let currentCourse: string[] = [];
+                  
+                  for (let w = 0; w < words.length; w++) {
+                    const word = words[w];
+                    // Si le mot est un chiffre seul ou "F1", "APP", etc., c'est la fin d'un cours
+                    if (word.match(/^\d+$|^[A-Z]{2,3}$/) && currentCourse.length > 0) {
+                      currentCourse.push(word);
+                      courses.push(currentCourse.join(' '));
+                      currentCourse = [];
+                    } else if (word.match(/^[A-Z]{3,}/)) {
+                      // Nouveau mot en majuscules
+                      if (currentCourse.length > 0 && word.length > 3) {
+                        // Peut-être le début d'un nouveau cours
+                        courses.push(currentCourse.join(' '));
+                        currentCourse = [word];
+                      } else {
+                        currentCourse.push(word);
+                      }
+                    } else {
+                      currentCourse.push(word);
+                    }
+                  }
+                  
+                  if (currentCourse.length > 0) {
+                    courses.push(currentCourse.join(' '));
+                  }
+                  
+                  if (courses.length > 1) {
+                    courseNames.push(...courses.filter(c => c.length >= 5));
+                  } else {
+                    courseNames.push(foundCourses[0]);
+                  }
+                } else {
+                  // Pas de pattern trouvé, passer à la méthode suivante
+                }
+              } else {
+                // On a des parties séparées
+                for (const part of parts) {
+                  const cleaned = part.trim();
+                  if (cleaned.length >= 5 && cleaned.match(/[A-Za-z]{3,}/)) {
+                    courseNames.push(cleaned);
+                  }
+                }
               }
-            }
-            // Chercher cours sans horaire dans la même ligne
-            else if (lineAfterDay.length > 3 && !lineAfterDay.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-              let subject = lineAfterDay
-                .replace(/\/$/, '')
-                .replace(/^[;\s.]+/, '')
-                .replace(/[;\s.]+$/, '')
-                .trim();
               
-              // Chercher salle
-              const classroomMatch = subject.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
-              if (classroomMatch) {
-                // Enlever la salle du nom du cours
-                subject = subject.replace(classroomMatch[0], '').trim();
-              }
-              
-              if (subject.length >= 3 && !subject.match(/^[\d\s\/:-]+$/)) {
-                courses.push({
-                  day: currentDay,
-                  start: '09:00', // Heure par défaut
-                  end: '10:30',
-                  subject: this.cleanOCRText(subject),
-                  classroom: classroomMatch ? classroomMatch[1] : undefined,
-                });
-                this.logger.debug(`✅ Found course inline with day (no time): ${subject} on ${currentDay}`);
-                processedLines.add(i);
+              // Si toujours pas de cours trouvés, essayer autrement
+              if (courseNames.length === 0) {
+                // Si pas de pattern trouvé, essayer de séparer par espaces multiples ou mots en majuscules
+                // Ex: "PROCEDURAL PROGRAMMING 1 ALGORITHMIC 1" -> ["PROCEDURAL PROGRAMMING 1", "ALGORITHMIC 1"]
+                const words = line.split(/\s{2,}/); // Séparer par espaces doubles ou plus
+                if (words.length > 1) {
+                  for (const word of words) {
+                    const cleaned = word.trim();
+                    if (cleaned.length >= 5 && cleaned.match(/[A-Za-z]{3,}/)) {
+                      courseNames.push(cleaned);
+                    }
+                  }
+                } else {
+                  // Une seule ligne, peut être un cours complet ou incomplet
+                  // Si la ligne se termine par "AND", "OF", "THE", etc., c'est peut-être incomplet
+                  if (line.match(/\b(AND|OF|THE|CULTURE|CITIZENSHIP)\s*$/i) || 
+                      (line.length < 25 && line.match(/[A-Z]{3,}/))) {
+                    // Chercher la suite dans les lignes précédentes ET suivantes
+                    let completeCourse = line;
+                    
+                    // D'abord chercher dans les lignes précédentes (pour les cours qui continuent)
+                    for (let k = Math.max(daysLineIndex + 1, courseLine.index - 2); k < courseLine.index; k++) {
+                      const prevLine = lines[k].trim();
+                      if (prevLine.length > 3 && 
+                          !prevLine.match(/\d{1,2}:\d{2}/) &&
+                          !prevLine.match(/^[A-Z]\d{2,3}$/) &&
+                          prevLine.match(/[A-Za-z]{3,}/)) {
+                        // Vérifier si c'est la suite (commence par des mots en majuscules)
+                        if (prevLine.match(/^[A-Z]/)) {
+                          completeCourse = prevLine + ' ' + completeCourse;
+                          break;
+                        }
+                      }
+                    }
+                    
+                    // Ensuite chercher dans les lignes suivantes
+                    for (let k = courseLine.index + 1; k < Math.min(lines.length, courseLine.index + 3); k++) {
+                      const nextLine = lines[k].trim();
+                      if (nextLine.length > 3 && 
+                          !nextLine.match(/\d{1,2}:\d{2}/) &&
+                          !nextLine.match(/^[A-Z]\d{2,3}$/) &&
+                          !nextLine.match(/^[A-Z]{3,}\s+[A-Z]{3,}/)) { // Pas un nouveau cours
+                        completeCourse += ' ' + nextLine;
+                        break;
+                      }
+                    }
+                    
+                    if (completeCourse.length >= 10) {
+                      courseNames.push(completeCourse);
+                    } else {
+                      // Si toujours trop court, prendre quand même
+                      courseNames.push(line);
+                    }
+                  } else {
+                    // Cours complet sur une ligne
+                    courseNames.push(line);
+                  }
+                }
               }
             }
           }
-        }
-        
-        // IMPORTANT: Chercher les cours dans les lignes PRÉCÉDENTES (2-3 lignes avant)
-        // car dans le format ESPRIT, les cours apparaissent AVANT le nom du jour
-        for (let j = Math.max(0, i - 3); j < i; j++) {
-          if (processedLines.has(j)) continue;
           
-          const prevLine = lines[j];
+          // Nettoyer et valider les noms de cours
+          const cleanedCourseNames = courseNames
+            .map(name => name
+              .replace(/\/$/, '')
+              .replace(/^[;\s.]+/, '')
+              .replace(/[;\s.]+$/, '')
+              .trim())
+            .filter(name => 
+              name.length >= 5 && 
+              !name.match(/^[A-Z]\d{2,3}$/) &&
+              !name.match(/^\d{2}\/\d{2}\/\d{4}/) &&
+              !this.detectDay(name) &&
+              !name.match(/^[—-]+$/) &&
+              name.match(/[A-Za-z]{3,}/)
+            );
           
-          // Ignorer les dates et les lignes déjà traitées
-          if (prevLine.match(/^\d{2}\/\d{2}\/\d{4}/) || this.detectDay(prevLine)) {
-            continue;
+          // Utiliser les cours nettoyés
+          courseNames.length = 0;
+          courseNames.push(...cleanedCourseNames);
+          
+          // Chercher la salle (généralement sur la même ligne ou ligne suivante)
+          let classroom: string | undefined;
+          const classroomMatch = line.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
+          if (classroomMatch) {
+            classroom = classroomMatch[1];
+          } else {
+            // Chercher dans les lignes autour
+            for (let j = Math.max(0, i - 2); j < Math.min(lines.length, i + 2); j++) {
+              const nearLine = lines[j];
+              const cm = nearLine.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
+              if (cm) {
+                classroom = cm[1];
+                break;
+              }
+            }
           }
           
-          // Chercher cours avec horaire explicite
-          const courseWithTimeMatch = prevLine.match(/(.+?)\s+(\d{1,2})H:(\d{2})\s*-\s*(\d{1,2})H:(\d{2})/);
-          if (courseWithTimeMatch) {
-            let subject = courseWithTimeMatch[1].trim()
+          // Associer chaque cours trouvé aux jours dans l'ordre
+          // Le nombre d'horaires correspond au nombre de jours avec cours
+          // On associe les cours dans l'ordre trouvé aux jours dans l'ordre (en sautant les jours sans cours)
+          const numTimeSlots = timeMatches.length;
+          
+          // Filtrer les jours qui ont probablement des cours (en se basant sur le nombre d'horaires)
+          // Si on a 4 horaires, on a probablement 4 jours avec cours (Lundi, Mardi, Jeudi, Vendredi)
+          const daysWithCourses: string[] = [];
+          let dayIndex = 0;
+          for (let slotIdx = 0; slotIdx < numTimeSlots && dayIndex < daysOrder.length; dayIndex++) {
+            const day = daysOrder[dayIndex];
+            // Ajouter le jour (on suppose que tous les jours jusqu'au nombre d'horaires ont des cours)
+            daysWithCourses.push(day);
+            slotIdx++;
+          }
+          
+          // Si on a plus de cours que de jours, prendre seulement les premiers
+          // Si on a moins de cours que de jours, certains jours n'ont pas de cours (normal)
+          const numCoursesToAssign = Math.min(courseNames.length, daysWithCourses.length);
+          
+          // Associer les cours aux jours
+          for (let courseIdx = 0; courseIdx < numCoursesToAssign; courseIdx++) {
+            let subject = courseNames[courseIdx];
+            
+            // Nettoyer le nom du cours
+            subject = subject
               .replace(/\/$/, '')
               .replace(/^[;\s.]+/, '')
               .replace(/[;\s.]+$/, '')
               .trim();
             
-            // Si le nom est trop court ou fragmenté, essayer de le reconstruire
-            if (subject.length < 5 || subject.match(/^[A-Z]{1,2}$/)) {
-              const reconstructed = this.reconstructCourseName(lines, j);
-              if (reconstructed) {
-                subject = reconstructed;
-              } else {
-                continue; // Ignorer si on ne peut pas reconstruire
-              }
-            }
-            
-            const startHour = courseWithTimeMatch[2].padStart(2, '0');
-            const startMin = courseWithTimeMatch[3];
-            const endHour = courseWithTimeMatch[4].padStart(2, '0');
-            const endMin = courseWithTimeMatch[5];
-            
-            // Chercher la salle dans les lignes autour
-            let classroom: string | undefined;
-            for (let k = Math.max(0, j - 2); k < Math.min(j + 3, lines.length); k++) {
-              const nearLine = lines[k];
-              const classroomMatch = nearLine.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
-              if (classroomMatch) {
-                classroom = classroomMatch[1];
-                break;
-              }
-            }
-            
-            if (subject.length > 5) {
+            // Valider le sujet
+            if (subject && 
+                subject.length >= 5 && 
+                !subject.match(/^[A-Z]\d{2,3}$/) &&
+                !subject.match(/^\d{2}\/\d{2}\/\d{4}/) &&
+                !this.detectDay(subject) &&
+                !subject.match(/^[—-]+$/)) {
+              
+              subject = this.cleanOCRText(subject);
+              
+              const day = daysWithCourses[courseIdx];
+              
               courses.push({
-                day: currentDay,
-                start: `${startHour}:${startMin}`,
-                end: `${endHour}:${endMin}`,
+                day: day,
+                start: timeSlot.start,
+                end: timeSlot.end,
                 subject: subject,
                 classroom: classroom,
               });
-              this.logger.debug(`Found course (before day): ${subject} on ${currentDay} at ${startHour}:${startMin}`);
-              processedLines.add(j);
+              
+              this.logger.debug(`✅ Found course: ${subject} on ${day} at ${timeSlot.start}-${timeSlot.end} in ${classroom || 'unknown room'}`);
             }
           }
           
-          // Chercher cours sans horaire (plus flexible)
-          // Pattern amélioré pour capturer les noms de cours même fragmentés
-          if (!prevLine.match(/\d{1,2}H:\d{2}/) && 
-              !prevLine.match(/^\d{2}\/\d{2}\/\d{4}/) &&
-              !this.detectDay(prevLine) &&
-              prevLine.length > 3) {
+          // Si on a des horaires mais pas assez de cours trouvés, 
+          // essayer de trouver les cours manquants dans d'autres lignes
+          if (numCoursesToAssign < daysWithCourses.length && courseNames.length < numTimeSlots) {
+            this.logger.debug(`⚠️ Found ${numTimeSlots} time slots but only ${courseNames.length} course names. Searching for more...`);
             
-            // Essayer plusieurs patterns
-            let subject: string | null = null;
-            
-            // Pattern 1: Nom de cours classique avec "/"
-            const courseMatch1 = prevLine.match(/([A-Za-z][A-Za-z0-9\s,\(\)\/\-_&]+?)(?:\s*\/\s*$|\s*$)/);
-            if (courseMatch1) {
-              subject = courseMatch1[1].trim()
-                .replace(/\/$/, '')
-                .replace(/^[;\s.]+/, '')
-                .replace(/[;\s.]+$/, '')
-                .trim();
-            }
-            
-            // Pattern 2: Si pas trouvé, prendre toute la ligne si elle ressemble à un cours
-            if (!subject || subject.length < 5) {
-              const courseMatch2 = prevLine.match(/([A-Za-z][A-Za-z0-9\s,\(\)\-_&]{4,})/);
-              if (courseMatch2) {
-                subject = courseMatch2[1].trim();
-              }
-            }
-            
-            // Si le nom est fragmenté, essayer de le reconstruire
-            if (subject && (subject.length < 5 || subject.match(/^[A-Z]{1,2}$/))) {
-              const reconstructed = this.reconstructCourseName(lines, j);
-              if (reconstructed) {
-                subject = reconstructed;
-              } else {
-                subject = null; // Ignorer si trop court
-              }
-            }
-            
-            // Filtrer les lignes invalides
-            if (subject && 
-                subject.length >= 5 && 
-                !subject.match(/^[A-Z]{1,2}$/) && 
-                !subject.match(/^[\s;,]+$/) &&
-                !subject.match(/^[PÀaUSEFes]+$/) &&
-                !subject.match(/^[A-Z]\d{2,3}$/)) {
+            // Chercher dans une zone plus large
+            for (let j = Math.max(daysLineIndex + 1, i - 10); j < i && courseNames.length < numTimeSlots; j++) {
+              const searchLine = lines[j].trim();
               
-              // Nettoyer le nom
-              subject = this.cleanOCRText(subject);
-              
-              // Chercher la salle
-              let classroom: string | undefined;
-              for (let k = Math.max(0, j - 2); k < Math.min(j + 3, lines.length); k++) {
-                const nearLine = lines[k];
-                if (this.detectDay(nearLine) || nearLine.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-                  break;
-                }
-                const classroomMatch = nearLine.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
-                if (classroomMatch) {
-                  classroom = classroomMatch[1];
-                  break;
+              // Ignorer les lignes déjà traitées ou invalides
+              if (searchLine.length > 5 && 
+                  searchLine.match(/[A-Za-z]{5,}/) &&
+                  !searchLine.match(/\d{1,2}:\d{2}/) &&
+                  !this.detectDay(searchLine) &&
+                  !searchLine.match(/^[A-Z]\d{2,3}$/) &&
+                  !courseLines.some(cl => cl.index === j)) {
+                
+                // Vérifier si cette ligne contient un cours qu'on n'a pas encore
+                const isNewCourse = !courseNames.some(cn => 
+                  searchLine.includes(cn) || cn.includes(searchLine)
+                );
+                
+                if (isNewCourse) {
+                  let subject = searchLine
+                    .replace(/\/$/, '')
+                    .replace(/^[;\s.]+/, '')
+                    .replace(/[;\s.]+$/, '')
+                    .trim();
+                  
+                  if (subject.length >= 5) {
+                    subject = this.cleanOCRText(subject);
+                    courseNames.push(subject);
+                    
+                    // Associer ce nouveau cours au prochain jour disponible
+                    if (courseNames.length <= daysWithCourses.length) {
+                      const day = daysWithCourses[courseNames.length - 1];
+                      
+                      courses.push({
+                        day: day,
+                        start: timeSlot.start,
+                        end: timeSlot.end,
+                        subject: subject,
+                        classroom: classroom,
+                      });
+                      
+                      this.logger.debug(`✅ Found additional course: ${subject} on ${day} at ${timeSlot.start}-${timeSlot.end}`);
+                    }
+                  }
                 }
               }
-              
-              // Déterminer l'horaire par défaut basé sur la position
-              // Si c'est dans la première moitié, matin, sinon après-midi
-              let defaultTime = { start: '10:45', end: '12:15' }; // Par défaut matin
-              if (j > lines.length / 2) {
-                defaultTime = { start: '15:15', end: '16:45' }; // Après-midi
+            }
+          }
+          
+          // Si on n'a pas trouvé de noms de cours mais qu'on a des horaires, 
+          // chercher dans les lignes précédentes de manière plus large
+          if (courseNames.length === 0) {
+            // Chercher dans une zone plus large (5-10 lignes avant)
+            for (let j = Math.max(daysLineIndex + 1, i - 10); j < i; j++) {
+              const searchLine = lines[j].trim();
+              if (searchLine.length > 10 && 
+                  searchLine.match(/[A-Za-z]{5,}/) &&
+                  !searchLine.match(/\d{1,2}:\d{2}/) &&
+                  !this.detectDay(searchLine)) {
+                
+                let subject = searchLine
+                  .replace(/\/$/, '')
+                  .replace(/^[;\s.]+/, '')
+                  .replace(/[;\s.]+$/, '')
+                  .trim();
+                
+                if (subject.length >= 5) {
+                  subject = this.cleanOCRText(subject);
+                  
+                  // Associer au premier jour disponible (approximation)
+                  const day = daysWithCourses[0] || daysOrder[0];
+                  
+                  courses.push({
+                    day: day,
+                    start: timeSlot.start,
+                    end: timeSlot.end,
+                    subject: subject,
+                    classroom: classroom,
+                  });
+                  
+                  this.logger.debug(`✅ Found course (fallback): ${subject} on ${day} at ${timeSlot.start}-${timeSlot.end}`);
+                  break; // Prendre seulement le premier cours trouvé
+                }
               }
-              
-              courses.push({
-                day: currentDay,
-                start: defaultTime.start,
-                end: defaultTime.end,
-                subject: subject,
-                classroom: classroom,
-              });
-              this.logger.debug(`Found course (no time, before day): ${subject} on ${currentDay}`);
-              processedLines.add(j);
             }
           }
         }
+      } else if (timeMatches.length === 1) {
+        // Un seul horaire sur la ligne - peut être un cours isolé
+        // Utiliser la méthode précédente pour l'associer à un jour
+        const timeSlot = { start: timeMatches[0].start, end: timeMatches[0].end };
         
-        continue;
-      }
-      
-      if (!currentDay) continue;
-      
-      // Format avec horaire explicite : "Nom du cours/ 13H:30 - 16H:45" ou "Nom du cours 13H:30 - 16H:45"
-      // Plus flexible : peut avoir des caractères avant (comme ";")
-      const courseWithTimeMatch = line.match(/(.+?)\s+(\d{1,2})H:(\d{2})\s*-\s*(\d{1,2})H:(\d{2})/);
-      if (courseWithTimeMatch) {
-        let subject = courseWithTimeMatch[1].trim()
-          .replace(/\/$/, '')
-          .replace(/^[;\s]+/, '') // Enlever les ";" et espaces au début
-          .replace(/[;\s]+$/, '') // Enlever les ";" et espaces à la fin
-          .trim();
+        // Chercher le nom du cours
+        let subject = '';
+        for (let j = Math.max(daysLineIndex + 1, i - 5); j < i; j++) {
+          const prevLine = lines[j].trim();
+          if (prevLine.length > 10 && 
+              prevLine.match(/[A-Za-z]{5,}/) &&
+              !prevLine.match(/\d{1,2}:\d{2}/) &&
+              !this.detectDay(prevLine)) {
+            subject = prevLine;
+            break;
+          }
+        }
         
-        const startHour = courseWithTimeMatch[2].padStart(2, '0');
-        const startMin = courseWithTimeMatch[3];
-        const endHour = courseWithTimeMatch[4].padStart(2, '0');
-        const endMin = courseWithTimeMatch[5];
-        
-        // Chercher la salle dans les lignes suivantes (dans les 3 prochaines lignes)
-        let classroom: string | undefined;
-        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-          const nextLine = lines[j];
-          // Chercher salle (A12, G102, etc.) ou "En Ligne"
-          const classroomMatch = nextLine.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
+        if (subject) {
+          subject = this.cleanOCRText(subject
+            .replace(/\/$/, '')
+            .replace(/^[;\s.]+/, '')
+            .replace(/[;\s.]+$/, '')
+            .trim());
+          
+          // Chercher la salle
+          let classroom: string | undefined;
+          const classroomMatch = line.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
           if (classroomMatch) {
             classroom = classroomMatch[1];
-            break;
+          }
+          
+          // Associer au jour le plus proche (approximation)
+          const day = daysOrder[0] || 'Monday';
+          
+          if (subject.length >= 5) {
+            courses.push({
+              day: day,
+              start: timeSlot.start,
+              end: timeSlot.end,
+              subject: subject,
+              classroom: classroom,
+            });
+            
+            this.logger.debug(`✅ Found single course: ${subject} on ${day} at ${timeSlot.start}-${timeSlot.end}`);
           }
         }
-        
-        // Chercher aussi la salle dans la ligne actuelle (après le cours)
-        if (!classroom) {
-          const inlineClassroom = line.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
-          if (inlineClassroom) {
-            classroom = inlineClassroom[1];
-          }
-        }
-        
-        // Si fragmenté, reconstruire
-        if (subject.length < 5 || subject.match(/^[A-Z]{1,2}$/)) {
-          const reconstructed = this.reconstructCourseName(lines, i);
-          if (reconstructed) {
-            subject = reconstructed;
-          } else {
-            continue;
-          }
-        }
-        
-        subject = this.cleanOCRText(subject);
-        
-        if (subject.length > 5) {
-          courses.push({
-            day: currentDay,
-            start: `${startHour}:${startMin}`,
-            end: `${endHour}:${endMin}`,
-            subject: subject,
-            classroom: classroom,
-          });
-          this.logger.debug(`Found course: ${subject} on ${currentDay} at ${startHour}:${startMin}`);
-          processedLines.add(i);
-        }
-        continue;
-      }
-      
-      // Format sans horaire (cours dans une colonne du tableau)
-      // Ex: "Procedural Programming 1/" ou "Algorithmic 1/" ou "Fundamentals of Math 1/"
-      // Plus flexible : peut avoir des caractères avant ou après
-      const courseMatch = line.match(/([A-Za-z][A-Za-z0-9\s,\(\)\/\-]+?)(?:\s*\/\s*$|\s*$)/);
-      if (courseMatch && !line.match(/\d{1,2}H:\d{2}/) && !line.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-        let subject = courseMatch[1].trim()
-          .replace(/\/$/, '')
-          .replace(/^[;\s]+/, '')
-          .replace(/[;\s]+$/, '')
-          .trim();
-        
-        // Si fragmenté, reconstruire
-        if (subject.length < 5 || subject.match(/^[A-Z]{1,2}$/)) {
-          const reconstructed = this.reconstructCourseName(lines, i);
-          if (reconstructed) {
-            subject = reconstructed;
-          } else {
-            continue;
-          }
-        }
-        
-        // Ignorer les lignes invalides
-        if (subject.match(/^[\s;,]+$/) ||
-            subject.match(/^[PÀaUSEFes]+$/) ||
-            this.detectDay(subject)) {
-          continue;
-        }
-        
-        subject = this.cleanOCRText(subject);
-        
-        // Déterminer l'horaire basé sur la position
-        let defaultTime = { start: '10:45', end: '12:15' };
-        if (i > lines.length / 2) {
-          defaultTime = { start: '15:15', end: '16:45' };
-        }
-        
-        // Chercher la salle dans les lignes suivantes
-        let classroom: string | undefined;
-        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-          const nextLine = lines[j];
-          // Ignorer si c'est un jour ou une date
-          if (this.detectDay(nextLine) || nextLine.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-            break;
-          }
-          const classroomMatch = nextLine.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
-          if (classroomMatch) {
-            classroom = classroomMatch[1];
-            break;
-          }
-        }
-        
-        // Chercher aussi dans la ligne actuelle
-        if (!classroom) {
-          const inlineClassroom = line.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
-          if (inlineClassroom) {
-            classroom = inlineClassroom[1];
-          }
-        }
-        
-        courses.push({
-          day: currentDay,
-          start: defaultTime.start,
-          end: defaultTime.end,
-          subject: subject,
-          classroom: classroom,
-        });
-        this.logger.debug(`Found course (no time): ${subject} on ${currentDay}`);
-        processedLines.add(i);
       }
     }
     
+    // Si on n'a pas trouvé de cours avec horaires, utiliser le parser fallback
+    if (courses.length === 0) {
+      this.logger.warn('No courses found with time-based parsing, using fallback');
+      return this.parseESPRITScheduleFallback(cleanedText, lines);
+    }
+    
     this.logger.log(`ESPRIT parser found ${courses.length} courses`);
+    return courses;
+  }
+  
+  /**
+   * Helper pour obtenir la position approximative d'un caractère dans une ligne
+   */
+  private getCharPositionInLine(line: string, searchText: string): number {
+    const index = line.indexOf(searchText);
+    return index !== -1 ? index : line.length / 2; // Fallback au milieu si pas trouvé
+  }
+  
+  /**
+   * Parser fallback pour le format ESPRIT (méthode originale améliorée)
+   * Utilisé si le parser principal ne trouve pas de cours
+   */
+  private parseESPRITScheduleFallback(text: string, lines: string[]): Course[] {
+    const courses: Course[] = [];
+    
+    // Chercher tous les horaires dans le texte avec leur contexte
+    const timePattern = /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/g;
+    const timeSlots: Array<{ start: string; end: string; lineIndex: number; context: string }> = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      let match;
+      while ((match = timePattern.exec(line)) !== null) {
+        const start = `${match[1].padStart(2, '0')}:${match[2]}`;
+        const end = `${match[3].padStart(2, '0')}:${match[4]}`;
+        
+        // Créer un contexte autour de cet horaire (lignes précédentes et suivantes)
+        const contextLines: string[] = [];
+        for (let j = Math.max(0, i - 2); j < Math.min(lines.length, i + 3); j++) {
+          contextLines.push(lines[j]);
+        }
+        const context = contextLines.join(' ');
+        
+        timeSlots.push({ start, end, lineIndex: i, context });
+      }
+    }
+    
+    // Pour chaque horaire, trouver le jour et le cours
+    for (const timeSlot of timeSlots) {
+      // Chercher le jour le plus proche dans le contexte
+      let bestDay: string | null = null;
+      let minDistance = Infinity;
+      
+      // Chercher dans les lignes avant l'horaire
+      for (let i = Math.max(0, timeSlot.lineIndex - 10); i < timeSlot.lineIndex; i++) {
+        const dayMatch = this.detectDay(lines[i]);
+        if (dayMatch) {
+          bestDay = dayMatch;
+          break;
+        }
+      }
+      
+      // Si pas trouvé, chercher dans tout le texte avant
+      if (!bestDay) {
+        const textBefore = lines.slice(0, timeSlot.lineIndex).join(' ');
+        for (const [frenchDay, englishDay] of Object.entries(this.dayMapping)) {
+          if (textBefore.toLowerCase().includes(frenchDay)) {
+            // Prendre le dernier jour trouvé (le plus proche)
+            const lastIndex = textBefore.toLowerCase().lastIndexOf(frenchDay);
+            if (lastIndex > minDistance) {
+              minDistance = lastIndex;
+              bestDay = englishDay;
+            }
+          }
+        }
+      }
+      
+      // Si toujours pas trouvé, utiliser une heuristique basée sur la position
+      if (!bestDay) {
+        // Chercher la ligne avec tous les jours
+        for (let i = 0; i < Math.min(20, lines.length); i++) {
+          const line = lines[i].toLowerCase();
+          const daysInLine: string[] = [];
+          for (const [frenchDay, englishDay] of Object.entries(this.dayMapping)) {
+            if (line.includes(frenchDay)) {
+              daysInLine.push(englishDay);
+            }
+          }
+          if (daysInLine.length >= 3) {
+            // Estimer la colonne en fonction de la position dans le texte
+            const estimatedCol = Math.floor((timeSlot.lineIndex / lines.length) * daysInLine.length);
+            bestDay = daysInLine[Math.min(estimatedCol, daysInLine.length - 1)];
+            break;
+          }
+        }
+      }
+      
+      if (!bestDay) {
+        bestDay = 'Monday'; // Fallback
+      }
+      
+      // Extraire le nom du cours depuis le contexte
+      let subject = '';
+      const contextLines = lines.slice(Math.max(0, timeSlot.lineIndex - 5), timeSlot.lineIndex + 1);
+      
+      // Chercher dans les lignes précédentes (en remontant)
+      const subjectParts: string[] = [];
+      for (let i = contextLines.length - 2; i >= 0; i--) {
+        const line = contextLines[i].trim();
+        // Ignorer les lignes avec horaires, jours, dates, salles seules, heures (09h, 10h, etc.)
+        if (!line.match(/\d{1,2}:\d{2}/) && 
+            !this.detectDay(line) && 
+            !line.match(/^\d{2}\/\d{2}\/\d{4}/) &&
+            !line.match(/^[A-Z]\d{2,3}$/) &&
+            !line.match(/^\d{1,2}h$/i) &&
+            line.length > 3 &&
+            !line.match(/^[—-]+$/)) {
+          
+          // Si la ligne contient des mots en majuscules (probablement un nom de cours)
+          if (line.match(/[A-Z]{3,}/) || line.length > 10) {
+            subjectParts.unshift(line);
+            // Arrêter si on a trouvé un nom de cours complet (plus de 15 caractères)
+            if (subjectParts.join(' ').length > 15) {
+              break;
+            }
+          }
+        }
+      }
+      
+      // Reconstruire le nom complet
+      if (subjectParts.length > 0) {
+        subject = subjectParts.join(' ');
+      }
+      
+      // Si pas trouvé, chercher dans la ligne avec l'horaire
+      if (!subject || subject.length < 5) {
+        const lineWithTime = lines[timeSlot.lineIndex];
+        const match = lineWithTime.match(/(.+?)\s+\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}/);
+        if (match) {
+          subject = match[1].trim();
+        }
+      }
+      
+      // Si toujours pas trouvé, chercher dans les lignes suivantes (pour les cours qui continuent après l'horaire)
+      if (!subject || subject.length < 5) {
+        for (let i = timeSlot.lineIndex + 1; i < Math.min(lines.length, timeSlot.lineIndex + 3); i++) {
+          const line = lines[i].trim();
+          if (line.length > 5 && 
+              !line.match(/\d{1,2}:\d{2}/) && 
+              !this.detectDay(line) &&
+              !line.match(/^[A-Z]\d{2,3}$/)) {
+            subject = (subject ? subject + ' ' : '') + line;
+            break;
+          }
+        }
+      }
+      
+      // Nettoyer le sujet
+      subject = subject
+        .replace(/\/$/, '')
+        .replace(/^[;\s.]+/, '')
+        .replace(/[;\s.]+$/, '')
+        .trim();
+      
+      // Si le sujet contient plusieurs cours (séparés par des espaces multiples ou patterns)
+      // Essayer de les séparer
+      if (subject.length > 30 && subject.match(/[A-Z]{3,}\s+[A-Z]{3,}/)) {
+        // Probablement plusieurs cours sur une ligne
+        // Pour l'instant, prendre le premier cours significatif
+        const words = subject.split(/\s+/);
+        const firstCourseWords: string[] = [];
+        for (const word of words) {
+          if (word.match(/^[A-Z]{3,}$/) && firstCourseWords.length < 5) {
+            firstCourseWords.push(word);
+          } else if (firstCourseWords.length > 0) {
+            break;
+          }
+        }
+        if (firstCourseWords.length > 0) {
+          subject = firstCourseWords.join(' ');
+        }
+      }
+      
+      // Chercher la salle
+      let classroom: string | undefined;
+      for (let i = Math.max(0, timeSlot.lineIndex - 2); i < Math.min(lines.length, timeSlot.lineIndex + 3); i++) {
+        const line = lines[i];
+        const match = line.match(/\b([A-Z]\d{2,3}|En Ligne)\b/i);
+        if (match) {
+          classroom = match[1];
+          break;
+        }
+      }
+      
+      // Valider et ajouter le cours
+      if (subject && 
+          subject.length >= 5 && 
+          !subject.match(/^[A-Z]\d{2,3}$/) &&
+          !subject.match(/^\d{2}\/\d{2}\/\d{4}/) &&
+          !this.detectDay(subject)) {
+        
+        subject = this.cleanOCRText(subject);
+        
+        courses.push({
+          day: bestDay,
+          start: timeSlot.start,
+          end: timeSlot.end,
+          subject: subject,
+          classroom: classroom,
+        });
+        
+        this.logger.debug(`✅ Fallback: Found course ${subject} on ${bestDay} at ${timeSlot.start}-${timeSlot.end}`);
+      }
+    }
+    
     return courses;
   }
 

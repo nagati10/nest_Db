@@ -23,19 +23,19 @@ export class ScheduleController {
 
   @Post('process')
   @ApiOperation({ 
-    summary: 'Process PDF schedule',
-    description: 'Upload a PDF schedule, extract text via OCR, and return structured JSON'
+    summary: 'Process schedule image',
+    description: 'Upload an image of a schedule (JPG, PNG), extract text via OCR, and return structured JSON'
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
-    description: 'PDF file containing schedule',
+    description: 'Image file containing schedule',
     schema: {
       type: 'object',
       properties: {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'PDF file to process',
+          description: 'Image file to process (JPG, PNG)',
         },
       },
       required: ['file'],
@@ -63,17 +63,21 @@ export class ScheduleController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid PDF file' })
+  @ApiResponse({ status: 400, description: 'Invalid image file' })
   @ApiResponse({ status: 500, description: 'Processing error' })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
       fileFilter: (req, file, cb) => {
-        // Validate PDF file
-        if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
+        // Validate image file (JPG, PNG, JPEG)
+        const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+        const allowedExtensions = ['.jpg', '.jpeg', '.png'];
+        const fileExtension = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
+        
+        if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
           cb(null, true);
         } else {
-          cb(new BadRequestException('Only PDF files are allowed'), false);
+          cb(new BadRequestException('Only image files (JPG, PNG) are allowed'), false);
         }
       },
       limits: {
@@ -84,14 +88,19 @@ export class ScheduleController {
   async processSchedule(@UploadedFile() file: Express.Multer.File): Promise<ProcessedSchedule> {
     try {
       if (!file) {
-        throw new BadRequestException('No PDF file provided');
+        throw new BadRequestException('No image file provided');
       }
 
-      if (file.mimetype !== 'application/pdf' && !file.originalname.toLowerCase().endsWith('.pdf')) {
-        throw new BadRequestException('File must be a PDF');
+      // Validate image file type
+      const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+      const allowedExtensions = ['.jpg', '.jpeg', '.png'];
+      const fileExtension = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
+      
+      if (!allowedMimeTypes.includes(file.mimetype) && !allowedExtensions.includes(fileExtension)) {
+        throw new BadRequestException('File must be an image (JPG or PNG)');
       }
 
-      const result = await this.scheduleService.processSchedulePDF(file.buffer);
+      const result = await this.scheduleService.processScheduleImage(file.buffer);
       
       return {
         courses: result.courses,
